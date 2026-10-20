@@ -1,0 +1,35 @@
+{{- if and .Values.gateway .Values.gateway.enabled .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway-ingress
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if and .Values.ingress.gateway.tls (eq .Values.ingress.gateway.tls.enabled true) }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.gateway.host | quote }}
+      secretName: {{ .Values.ingress.gateway.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.gateway.host | default "gateway.local.test" | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "mcpilot.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.service.port | default 8000 }}
+{{- end }}

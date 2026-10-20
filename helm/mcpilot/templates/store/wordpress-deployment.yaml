@@ -1,0 +1,75 @@
+{{- if .Values.store.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-wordpress
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: wordpress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: wordpress
+    spec:
+      securityContext:
+        fsGroup: 33
+      containers:
+        - name: wordpress
+          image: "{{ .Values.store.wordpress.image.repository }}:{{ .Values.store.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.store.wordpress.image.pullPolicy }}
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: "{{ include "mcpilot.fullname" . }}-mariadb:3306"
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.store.mariadb.user | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: mariadb-password
+            - name: WORDPRESS_DB_NAME
+              value: {{ .Values.store.mariadb.database | quote }}
+          ports:
+            - name: http
+              containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.store.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html/wp-content
+      volumes:
+        - name: wordpress-data
+          {{- if .Values.store.wordpress.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "mcpilot.fullname" . }}-wordpress-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

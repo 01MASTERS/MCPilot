@@ -1,0 +1,23 @@
+{
+  "name": "mcpilot-analytics-mcp",
+  "version": "1.0.0",
+  "description": "MCPilot Store Analytics & Metrics MCP Server",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}

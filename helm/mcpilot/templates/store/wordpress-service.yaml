@@ -1,0 +1,20 @@
+{{- if .Values.store.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-wordpress
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+spec:
+  type: {{ .Values.store.wordpress.service.type }}
+  ports:
+    - port: {{ .Values.store.wordpress.service.port }}
+      targetPort: 80
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: wordpress
+{{- end }}

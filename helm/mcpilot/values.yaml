@@ -1,0 +1,141 @@
+global:
+  environment: local
+
+secrets:
+  mariadbRootPassword: "root_super_secure_password"
+  mariadbPassword: "wc_db_password"
+  wpAdminPassword: "admin_super_secure_password"
+
+store:
+  enabled: true
+  wordpress:
+    image:
+      repository: wordpress
+      tag: "6.7.1-apache"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 80
+    persistence:
+      enabled: true
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+    admin:
+      user: admin
+      email: admin@example.com
+      title: "MCPilot WooCommerce Store"
+
+  mariadb:
+    image:
+      repository: mariadb
+      tag: "10.11"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3306
+    database: "wordpress"
+    user: "wordpress"
+    persistence:
+      enabled: true
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations: {}
+  store:
+    host: "store.local.test"
+  gateway:
+    host: "gateway.local.test"
+
+gateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: mcpilot-gateway
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+
+mcpServers:
+  woocommerce:
+    enabled: true
+    image:
+      repository: mcpilot-woocommerce-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3000
+    secretName: "mcpilot-wc-api"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  analytics:
+    enabled: true
+    image:
+      repository: mcpilot-analytics-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3001
+    secretName: "mcpilot-wc-api"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  time:
+    enabled: true
+    image:
+      repository: mcpilot-time-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3002
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+

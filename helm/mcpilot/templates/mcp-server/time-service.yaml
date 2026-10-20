@@ -1,0 +1,20 @@
+{{- if and .Values.mcpServers .Values.mcpServers.time .Values.mcpServers.time.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-time-mcp
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: time-mcp
+spec:
+  type: {{ .Values.mcpServers.time.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.mcpServers.time.service.port | default 3002 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: time-mcp
+{{- end }}

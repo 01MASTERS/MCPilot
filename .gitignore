@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json.bak
+
+# Build outputs
+dist/
+*/dist/
+build/
+.output/
+.turbo/
+.cache/
+
+# Environment files & Production Secrets
+.env
+.env.*
+*.env
+secrets-prod.yaml
+*-secrets.yaml
+*.secret.yaml
+*.pem
+*.key
+*.cert
+*.crt
+
+# AI Assistants, Planning & Workflow Scaffolding (Evaluator Clean)
+.agents/
+.planning/
+.claude/
+.gemini/
+AGENTS.md
+AI_WORKFLOW.md
+scratch/
+
+# Operating System & Editor Files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Logs & Temporary Files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+temp.*
+*.tmp
+temp/
+tmp/

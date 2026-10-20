@@ -1,0 +1,74 @@
+{{- if and .Values.mcpServers .Values.mcpServers.woocommerce .Values.mcpServers.woocommerce.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-woocommerce-mcp
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: woocommerce-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: woocommerce-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: woocommerce-mcp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: woocommerce-mcp
+          image: "{{ .Values.mcpServers.woocommerce.image.repository }}:{{ .Values.mcpServers.woocommerce.image.tag }}"
+          imagePullPolicy: {{ .Values.mcpServers.woocommerce.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PORT
+              value: "{{ .Values.mcpServers.woocommerce.service.port | default 3000 }}"
+            - name: WORDPRESS_URL
+              value: "http://{{ include "mcpilot.fullname" . }}-wordpress:80"
+            - name: WC_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mcpServers.woocommerce.secretName | default "mcpilot-wc-api" }}
+                  key: consumer_key
+            - name: WC_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mcpServers.woocommerce.secretName | default "mcpilot-wc-api" }}
+                  key: consumer_secret
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.mcpServers.woocommerce.resources | nindent 12 }}
+{{- end }}

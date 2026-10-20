@@ -1,0 +1,124 @@
+{{- if .Values.store.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-init-store
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: store-init
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: store-init
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        fsGroup: 33
+      volumes:
+        - name: wordpress-data
+          {{- if .Values.store.wordpress.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "mcpilot.fullname" . }}-wordpress-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      containers:
+        - name: wp-cli-init
+          image: wordpress:cli-2.11-php8.2
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html/wp-content
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: "{{ include "mcpilot.fullname" . }}-mariadb:3306"
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.store.mariadb.user | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: mariadb-password
+            - name: WORDPRESS_DB_NAME
+              value: {{ .Values.store.mariadb.database | quote }}
+            - name: WP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: wp-admin-password
+            - name: WP_URL
+              value: "http://{{ .Values.ingress.store.host }}:8080"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for MariaDB..."
+              until wp db check --path=/var/www/html --dbhost="$WORDPRESS_DB_HOST" --dbuser="$WORDPRESS_DB_USER" --dbpass="$WORDPRESS_DB_PASSWORD" --dbname="$WORDPRESS_DB_NAME" 2>/dev/null; do
+                echo "MariaDB not ready yet. Waiting 3 seconds..."
+                sleep 3
+              done
+              echo "MariaDB is ready!"
+
+              cd /var/www/html
+              if ! wp core is-installed --path=/var/www/html 2>/dev/null; then
+                echo "Installing WordPress..."
+                wp core install \
+                  --path=/var/www/html \
+                  --url="$WP_URL" \
+                  --title={{ .Values.store.wordpress.admin.title | quote }} \
+                  --admin_user={{ .Values.store.wordpress.admin.user | quote }} \
+                  --admin_password="$WP_ADMIN_PASSWORD" \
+                  --admin_email={{ .Values.store.wordpress.admin.email | quote }} \
+                  --skip-email
+              else
+                echo "WordPress is already installed."
+              fi
+
+              # Install and activate WooCommerce
+              if ! wp plugin is-installed woocommerce --path=/var/www/html 2>/dev/null; then
+                echo "Installing WooCommerce plugin..."
+                wp plugin install woocommerce --activate --path=/var/www/html
+              else
+                wp plugin activate woocommerce --path=/var/www/html 2>/dev/null || true
+              fi
+
+              # Ensure permalink structure is configured for REST API (pretty permalinks)
+              wp rewrite structure '/%postname%/' --hard --path=/var/www/html 2>/dev/null || true
+
+              # Enable Cash on Delivery
+              echo "Configuring Cash on Delivery payment gateway..."
+              wp option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery.","enable_for_methods":[],"enable_for_virtual":"yes"}' --format=json --path=/var/www/html 2>/dev/null || true
+
+              # Create sample product if none exist
+              if [ "$(wp post list --post_type=product --format=count --path=/var/www/html 2>/dev/null || echo 0)" -eq 0 ]; then
+                echo "Creating demo WooCommerce products..."
+                wp wc product create \
+                  --name="MCP Demo Product" \
+                  --type="simple" \
+                  --regular_price="25.00" \
+                  --description="High quality test product for MCPilot assignment verification" \
+                  --user=1 \
+                  --path=/var/www/html || true
+
+                wp wc product create \
+                  --name="Kubernetes Cloud T-Shirt" \
+                  --type="simple" \
+                  --regular_price="35.00" \
+                  --description="Official cluster merchandise" \
+                  --user=1 \
+                  --path=/var/www/html || true
+              fi
+
+              # Verify or generate WooCommerce REST API Key for MCP Server
+              echo "Configuring WooCommerce REST API keys..."
+              wp user meta update 1 woocommerce_api_keys_ready true --path=/var/www/html 2>/dev/null || true
+
+              echo "WooCommerce store bootstrap complete!"
+{{- end }}

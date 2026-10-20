@@ -1,0 +1,81 @@
+{{- if and .Values.gateway .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PORT
+              value: "{{ .Values.gateway.service.port | default 8000 }}"
+            - name: DB_HOST
+              value: "{{ include "mcpilot.fullname" . }}-mariadb"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USER
+              value: {{ .Values.store.mariadb.user | default "wordpress" | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: mariadb-password
+            - name: DB_NAME
+              value: "mcpilot_gateway"
+            - name: WC_MCP_URL
+              value: "http://{{ include "mcpilot.fullname" . }}-woocommerce-mcp:3000/mcp"
+            - name: ANALYTICS_MCP_URL
+              value: "http://{{ include "mcpilot.fullname" . }}-analytics-mcp:3001/mcp"
+            - name: TIME_MCP_URL
+              value: "http://{{ include "mcpilot.fullname" . }}-time-mcp:3002/mcp"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+{{- end }}

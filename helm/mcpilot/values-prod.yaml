@@ -1,0 +1,163 @@
+# Production Helm Values for MCPilot (VPS k3s / Managed Kubernetes)
+# Usage: helm install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-prod.yaml
+
+global:
+  environment: production
+
+# Production Ingress with Traefik & Let's Encrypt TLS (cert-manager)
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  store:
+    host: "store.mcpilot.example.com"
+    tls:
+      enabled: true
+      secretName: "mcpilot-store-tls"
+  gateway:
+    host: "gateway.mcpilot.example.com"
+    tls:
+      enabled: true
+      secretName: "mcpilot-gateway-tls"
+
+# Storefront Infrastructure (WordPress & MariaDB)
+store:
+  enabled: true
+  wordpress:
+    image:
+      repository: wordpress
+      tag: "6.7.1-apache"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 80
+    persistence:
+      enabled: true
+      storageClass: "" # Defaults to cluster default CSI provisioner (e.g. local-path on k3s)
+      accessMode: ReadWriteOnce
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1500m
+        memory: 1536Mi
+    admin:
+      user: admin
+      email: admin@mcpilot.example.com
+      title: "MCPilot Production Store"
+
+  mariadb:
+    image:
+      repository: mariadb
+      tag: "10.11"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3306
+    database: "wordpress"
+    user: "wordpress"
+    persistence:
+      enabled: true
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+
+# Team MCP Gateway Workload
+gateway:
+  enabled: true
+  replicaCount: 2 # High-availability multi-pod deployment
+  image:
+    repository: mcpilot-gateway
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+
+# Upstream MCP Servers (Isolated ClusterIP Microservices)
+mcpServers:
+  woocommerce:
+    enabled: true
+    image:
+      repository: mcpilot-woocommerce-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3000
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      allowPrivilegeEscalation: false
+
+  analytics:
+    enabled: true
+    image:
+      repository: mcpilot-analytics-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3001
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      allowPrivilegeEscalation: false
+
+  time:
+    enabled: true
+    image:
+      repository: mcpilot-time-mcp
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3002
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      allowPrivilegeEscalation: false

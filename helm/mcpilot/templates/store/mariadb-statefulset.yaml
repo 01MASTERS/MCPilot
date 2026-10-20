@@ -1,0 +1,103 @@
+{{- if .Values.store.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-mariadb
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mariadb
+spec:
+  serviceName: {{ include "mcpilot.fullname" . }}-mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: mariadb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "mcpilot.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: mariadb
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: mariadb
+          image: "{{ .Values.store.mariadb.image.repository }}:{{ .Values.store.mariadb.image.tag }}"
+          imagePullPolicy: {{ .Values.store.mariadb.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: mariadb-root-password
+            - name: MYSQL_DATABASE
+              value: {{ .Values.store.mariadb.database | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.store.mariadb.user | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcpilot.fullname" . }}-secrets
+                  key: mariadb-password
+          ports:
+            - name: mysql
+              containerPort: 3306
+          livenessProbe:
+            exec:
+              command:
+                - /usr/bin/mariadb-admin
+                - ping
+                - -h
+                - 127.0.0.1
+                - -u
+                - root
+                - -p$(MYSQL_ROOT_PASSWORD)
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - /usr/bin/mariadb-admin
+                - ping
+                - -h
+                - 127.0.0.1
+                - -u
+                - root
+                - -p$(MYSQL_ROOT_PASSWORD)
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.store.mariadb.resources | nindent 12 }}
+          volumeMounts:
+            - name: mariadb-data
+              mountPath: /var/lib/mysql
+  {{- if .Values.store.mariadb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: mariadb-data
+      spec:
+        accessModes:
+          - {{ .Values.store.mariadb.persistence.accessMode | quote }}
+        {{- if .Values.store.mariadb.persistence.storageClass }}
+        storageClassName: {{ .Values.store.mariadb.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.store.mariadb.persistence.size | quote }}
+  {{- else }}
+      volumes:
+        - name: mariadb-data
+          emptyDir: {}
+  {{- end }}
+{{- end }}

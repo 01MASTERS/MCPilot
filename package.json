@@ -1,0 +1,24 @@
+{
+  "name": "mcpilot",
+  "version": "1.0.0",
+  "description": "MCPilot: WooCommerce Hosting & Team MCP Gateway on Kubernetes",
+  "type": "module",
+  "scripts": {
+    "verify:user-a": "node scripts/verify-user-a.mjs",
+    "verify:user-b": "node scripts/verify-user-b.mjs",
+    "verify:revocation": "node scripts/verify-revocation.mjs",
+    "verify:fault-isolation": "node scripts/verify-fault-isolation.mjs",
+    "verify:security": "node scripts/verify-security.mjs",
+    "verify:team": "node scripts/verify-team-mgmt.mjs",
+    "verify:all": "node scripts/verify-all.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "kubernetes",
+    "woocommerce",
+    "gateway"
+  ],
+  "author": "",
+  "license": "ISC"
+}

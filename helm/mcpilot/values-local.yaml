@@ -1,0 +1,32 @@
+global:
+  environment: local
+
+store:
+  wordpress:
+    persistence:
+      storageClass: "local-path"
+  mariadb:
+    persistence:
+      storageClass: "local-path"
+
+ingress:
+  enabled: true
+  className: "traefik"
+  store:
+    host: "store.local.test"
+  gateway:
+    host: "gateway.local.test"
+
+gateway:
+  enabled: true
+
+mcpServers:
+  woocommerce:
+    enabled: true
+  analytics:
+    enabled: true
+  time:
+    enabled: true
+
+
+
