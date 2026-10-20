@@ -467,3 +467,51 @@ npm run verify:team             # AUTH-01/04: Admin upstream editing & team memb
 | **VERIF-03** | Verification of instant key revocation (HTTP 401) | `scripts/verify-revocation.mjs` | Automated test suite PASSED |
 | **VERIF-04** | Verification of fault isolation during pod kill | `scripts/verify-fault-isolation.mjs` | Automated test suite PASSED |
 | **VERIF-05** | Comprehensive repository README with architecture & guide | `README.md` | Executive root documentation complete |
+| **BONUS-01** | Multi-Store Provisioning REST API & Dashboard UI | `gateway/src/stores-api.ts`, `StoresView.tsx` | Provision/list/delete endpoints active |
+| **BONUS-02** | Kubernetes-native isolated namespaces (`store-<slug>`) | `gateway/src/provisioning/store-templates.ts` | Dedicated MariaDB, WordPress & PVCs |
+| **BONUS-03** | Independent MariaDB StatefulSet & WordPress per store | `gateway/src/provisioning/store-provisioner.ts` | Verified independent data stores |
+| **BONUS-04** | Automated WooCommerce MCP server provisioning | `gateway/src/provisioning/store-templates.ts` | Dedicated MCP server pod per namespace |
+| **BONUS-05** | Dynamic Upstream Registration & Tool Namespacing (`store_<slug>__*`) | `gateway/src/tool-aggregator.ts` | Auto-registered without gateway restart |
+| **BONUS-06** | ResourceQuota, LimitRange & NetworkPolicy Cross-Namespace Blocking | `gateway/src/provisioning/store-templates.ts` | Quota & egress denial verified |
+| **BONUS-07** | Cross-Store Chat Agent Query & Order Comparison | `gateway/src/chat-agent.ts` | Cross-store tool calls & synthesis verified |
+
+---
+
+## 13. Bonus Platform: Multi-Store Provisioning Platform
+
+Transform MCPilot into a multi-tenant store provisioning platform where users and administrators can dynamically spin up, query, and cleanly teardown independent WooCommerce environments on demand.
+
+```
+                           +----------------------------------------------------+
+                           |             MCPilot Gateway Service                |
+                           |  - Stores Management REST API (/api/stores)        |
+                           |  - Dynamic Upstream Auto-Registration              |
+                           |  - Namespaced Tool Federation (store_<slug>__*)    |
+                           +----------------------------------------------------+
+                                      |                             |
+                       NetworkPolicy: |              NetworkPolicy: |
+                  Allow Ingress + MCP |         Allow Ingress + MCP |
+                      Deny Cross-Store|             Deny Cross-Store|
+                                      v                             v
+           +---------------------------------------+   +---------------------------------------+
+           |     Namespace: store-alpha            |   |     Namespace: store-beta             |
+           |  - WordPress 6.7.1 Pod                |   |  - WordPress 6.7.1 Pod                |
+           |  - MariaDB 10.11 StatefulSet          |   |  - MariaDB 10.11 StatefulSet          |
+           |  - WooCommerce MCP Server Pod         |   |  - WooCommerce MCP Server Pod         |
+           |  - PersistentVolumeClaims (data, wp)  |   |  - PersistentVolumeClaims (data, wp)  |
+           |  - ResourceQuota (6 pods, 2Gi mem)    |   |  - ResourceQuota (6 pods, 2Gi mem)    |
+           |  - Ingress: http://alpha.local.test   |   |  - Ingress: http://beta.local.test    |
+           +---------------------------------------+   +---------------------------------------+
+```
+
+### Key Architectural Guarantees:
+1. **Dynamic Upstream Auto-Registration (`BONUS-03`, `BONUS-05`)**: When a new store is created, its dedicated WooCommerce MCP Server pod is automatically registered in MariaDB `mcp_servers`. The Gateway's `ToolAggregator` dynamically discovers the server and prefixes all tools as `store_<slug>__*` (e.g. `store_alpha__list_orders`), exposing them to clients and the Chat Agent with zero gateway restarts.
+2. **NetworkPolicy Isolation (`BONUS-06`)**: Each namespace enforces a strict `store-isolation-policy` that drops all cross-namespace egress traffic. A compromised container in `store-alpha` cannot communicate with MariaDB or WordPress in `store-beta`.
+3. **Multi-Store Chat Agent Intelligence (`BONUS-07`)**: The built-in Chat Agent seamlessly invokes tools from multiple stores in a single conversational turn (e.g. comparing sales or stock levels across Store Alpha and Store Beta).
+4. **Cascading Teardown**: Deleting a store cleanly deletes its Kubernetes namespace, PVCs, and unregisters its MCP routes immediately from `/mcp`.
+
+### Running the Bonus Verification Suite:
+```bash
+npm run verify:bonus
+```
+

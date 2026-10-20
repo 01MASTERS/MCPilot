@@ -50,6 +50,19 @@ export interface AuditLogRecord {
   created_at?: Date;
 }
 
+export interface StoreRecord {
+  id: string;
+  name: string;
+  slug: string;
+  namespace: string;
+  ingress_host: string;
+  status: "provisioning" | "ready" | "failed" | "deleting";
+  created_by: string;
+  created_at?: Date;
+  updated_at?: Date;
+  error_message?: string | null;
+}
+
 let pool: mysql.Pool | null = null;
 
 export function getDbPool(): mysql.Pool {
@@ -132,6 +145,24 @@ export async function initDatabase(): Promise<void> {
       INDEX idx_tool_name (tool_name),
       INDEX idx_status (status),
       INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  // 5. Multi-Store Environments table (BONUS-01, BONUS-02)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS stores (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      slug VARCHAR(64) UNIQUE NOT NULL,
+      namespace VARCHAR(64) UNIQUE NOT NULL,
+      ingress_host VARCHAR(255) NOT NULL,
+      status ENUM('provisioning', 'ready', 'failed', 'deleting') DEFAULT 'provisioning',
+      created_by VARCHAR(64) NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      error_message TEXT NULL,
+      INDEX idx_status (status),
+      INDEX idx_created_by (created_by)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
@@ -227,4 +258,105 @@ export async function updateServerStatus(
     "UPDATE mcp_servers SET status = ?, error_message = ?, last_health_check = NOW() WHERE id = ?",
     [status, errorMessage || null, id]
   );
+}
+
+// Multi-Store CRUD operations (BONUS-01, BONUS-02)
+
+export async function createStoreRecord(store: Omit<StoreRecord, 'created_at' | 'updated_at'>): Promise<void> {
+  const db = getDbPool();
+  await db.query(
+    `INSERT INTO stores (id, name, slug, namespace, ingress_host, status, created_by, error_message)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      store.id,
+      store.name,
+      store.slug,
+      store.namespace,
+      store.ingress_host,
+      store.status,
+      store.created_by,
+      store.error_message || null
+    ]
+  );
+}
+
+export async function getStoreRecord(id: string): Promise<StoreRecord | null> {
+  const db = getDbPool();
+  const [rows] = await db.query<any[]>("SELECT * FROM stores WHERE id = ?", [id]);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    namespace: r.namespace,
+    ingress_host: r.ingress_host,
+    status: r.status,
+    created_by: r.created_by,
+    created_at: r.created_at ? new Date(r.created_at) : undefined,
+    updated_at: r.updated_at ? new Date(r.updated_at) : undefined,
+    error_message: r.error_message
+  };
+}
+
+export async function getStoreRecordBySlug(slug: string): Promise<StoreRecord | null> {
+  const db = getDbPool();
+  const [rows] = await db.query<any[]>("SELECT * FROM stores WHERE slug = ?", [slug]);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    namespace: r.namespace,
+    ingress_host: r.ingress_host,
+    status: r.status,
+    created_by: r.created_by,
+    created_at: r.created_at ? new Date(r.created_at) : undefined,
+    updated_at: r.updated_at ? new Date(r.updated_at) : undefined,
+    error_message: r.error_message
+  };
+}
+
+export async function listStoreRecords(): Promise<StoreRecord[]> {
+  const db = getDbPool();
+  const [rows] = await db.query<any[]>("SELECT * FROM stores ORDER BY created_at DESC");
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    namespace: r.namespace,
+    ingress_host: r.ingress_host,
+    status: r.status,
+    created_by: r.created_by,
+    created_at: r.created_at ? new Date(r.created_at) : undefined,
+    updated_at: r.updated_at ? new Date(r.updated_at) : undefined,
+    error_message: r.error_message
+  }));
+}
+
+export async function updateStoreStatus(
+  id: string,
+  status: StoreRecord['status'],
+  errorMessage?: string | null
+): Promise<void> {
+  const db = getDbPool();
+  await db.query(
+    "UPDATE stores SET status = ?, error_message = ? WHERE id = ?",
+    [status, errorMessage || null, id]
+  );
+}
+
+export async function deleteStoreRecord(id: string): Promise<void> {
+  const db = getDbPool();
+  await db.query("DELETE FROM stores WHERE id = ?", [id]);
+}
+
+export async function countActiveStoresByUser(userId: string): Promise<number> {
+  const db = getDbPool();
+  const [rows] = await db.query<any[]>(
+    "SELECT COUNT(*) as cnt FROM stores WHERE created_by = ? AND status != 'failed'",
+    [userId]
+  );
+  return rows[0]?.cnt || 0;
 }

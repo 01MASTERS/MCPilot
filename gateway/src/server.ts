@@ -20,6 +20,7 @@ import { createApiKeysRouter, mcpAuthMiddleware } from "./api-keys.js";
 import { createServersRouter } from "./servers-api.js";
 import { createAuditRouter, logToolInvocation } from "./audit.js";
 import { createChatRouter } from "./chat-agent.js";
+import { createStoresRouter } from "./stores-api.js";
 
 dotenv.config();
 
@@ -122,6 +123,7 @@ export function startGatewayApp(
   app.use("/api/servers", createServersRouter(upstreamManager, toolAggregator));
   app.use("/api/audit", createAuditRouter());
   app.use("/api/chat", createChatRouter(toolAggregator));
+  app.use("/api/stores", createStoresRouter(toolAggregator));
 
   // Health check endpoint displaying Gateway status and upstream server states (GATE-07)
   app.get("/healthz", async (_req: Request, res: Response) => {

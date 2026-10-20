@@ -11,6 +11,7 @@ import { LoginScreen } from "./components/LoginScreen";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { ServersView } from "./components/ServersView";
+import { StoresView } from "./components/StoresView";
 import { ApiKeysView } from "./components/ApiKeysView";
 import { AuditView } from "./components/AuditView";
 import { ChatAgent } from "./components/ChatAgent";
@@ -19,7 +20,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<"servers" | "keys" | "audit" | "chat">("servers");
+  const [activeTab, setActiveTab] = useState<"servers" | "stores" | "keys" | "audit" | "chat">("servers");
   const [servers, setServers] = useState<McpServer[]>([]);
   const [tools, setTools] = useState<McpTool[]>([]);
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -89,6 +90,7 @@ export function App() {
 
   const tabTitles: Record<string, string> = {
     servers: "Upstream MCP Servers & Aggregated Catalog",
+    stores: "Multi-Store Environments & Automated Provisioning",
     keys: "Team Access Control & API Key Lifecycle",
     audit: "Granular Audit Trail & Trace Inspector",
     chat: "Interactive Chat Agent & Federated Tool Invocation",
@@ -120,6 +122,10 @@ export function App() {
               currentUser={currentUser}
               onRefresh={loadData}
             />
+          )}
+
+          {activeTab === "stores" && (
+            <StoresView currentUser={currentUser} />
           )}
 
           {activeTab === "keys" && (

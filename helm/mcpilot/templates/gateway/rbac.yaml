@@ -1,0 +1,62 @@
+{{- if and .Values.gateway .Values.gateway.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway-provisioner
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway-provisioner
+rules:
+  # Multi-Store Provisioning permissions (BONUS-02, BONUS-04, BONUS-05, BONUS-06)
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - resourcequotas
+      - limitranges
+      - secrets
+      - persistentvolumeclaims
+      - services
+      - pods
+      - pods/status
+      - configmaps
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+      - ingresses
+    verbs: ["*"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway-provisioner-binding
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mcpilot.fullname" . }}-gateway
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "mcpilot.fullname" . }}-gateway-provisioner
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

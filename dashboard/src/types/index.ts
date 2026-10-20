@@ -56,3 +56,18 @@ export interface AuditLog {
   errorMessage?: string | null;
   createdAt: string;
 }
+
+export interface StoreEnvironment {
+  id: string;
+  name: string;
+  slug: string;
+  namespace: string;
+  ingressHost: string;
+  url: string;
+  status: "provisioning" | "ready" | "failed" | "deleting";
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
+  errorMessage?: string | null;
+  toolCount: number;
+}

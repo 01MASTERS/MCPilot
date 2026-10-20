@@ -10,6 +10,7 @@
     "verify:fault-isolation": "node scripts/verify-fault-isolation.mjs",
     "verify:security": "node scripts/verify-security.mjs",
     "verify:team": "node scripts/verify-team-mgmt.mjs",
+    "verify:bonus": "node scripts/verify-multi-store.mjs",
     "verify:all": "node scripts/verify-all.mjs"
   },
   "keywords": [

@@ -17,7 +17,8 @@ const SUITES = [
   { name: "VERIF-03: Instant API Key Revocation Lifecycle", script: "scripts/verify-revocation.mjs" },
   { name: "VERIF-04: Fault Isolation & Pod Kill Resilience", script: "scripts/verify-fault-isolation.mjs" },
   { name: "INFRA-06: Container Security & Non-Root Contexts", script: "scripts/verify-security.mjs" },
-  { name: "AUTH-01/04: Team Member Management & Server Editing", script: "scripts/verify-team-mgmt.mjs" }
+  { name: "AUTH-01/04: Team Member Management & Server Editing", script: "scripts/verify-team-mgmt.mjs" },
+  { name: "BONUS-01..07: Multi-Store Provisioning Platform", script: "scripts/verify-multi-store.mjs" }
 ];
 
 async function main() {

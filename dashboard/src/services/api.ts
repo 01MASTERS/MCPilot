@@ -1,4 +1,4 @@
-import type { User, TeamMember, McpServer, McpTool, ApiKey, AuditLog } from "../types";
+import type { User, TeamMember, McpServer, McpTool, ApiKey, AuditLog, StoreEnvironment } from "../types";
 
 const TOKEN_KEY = "mcpilot_jwt_token";
 
@@ -249,6 +249,44 @@ export async function sendChatMessage(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Chat request failed" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Multi-Store API methods (BONUS-01)
+
+export async function getStores(): Promise<{ stores: StoreEnvironment[]; quota: { maxStoresPerUser: number } }> {
+  const res = await fetch("/api/stores", {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to fetch stores" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function provisionStore(payload: { name: string; slug?: string }): Promise<{ message: string; store: StoreEnvironment }> {
+  const res = await fetch("/api/stores", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to provision store" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteStore(id: string): Promise<{ message: string }> {
+  const res = await fetch(`/api/stores/${id}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to delete store" }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
