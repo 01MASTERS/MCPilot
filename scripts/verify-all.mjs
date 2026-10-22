@@ -21,7 +21,8 @@ const SUITES = [
   { name: "BONUS-01..07: Multi-Store Provisioning Platform", script: "scripts/verify-multi-store.mjs" },
   { name: "OBS-01..04: Gateway Observability & Telemetry", script: "scripts/verify-observability.mjs" },
   { name: "PERM-01..05: Tool Permissions & Role-Based Filtering", script: "scripts/verify-tool-permissions.mjs" },
-  { name: "MANY-01..05: Handling Many Tools & Meta-Tools", script: "scripts/verify-many-tools.mjs" }
+  { name: "MANY-01..05: Handling Many Tools & Meta-Tools", script: "scripts/verify-many-tools.mjs" },
+  { name: "SEC-01..04: Security Hardening & SSRF/Encryption/RBAC", script: "scripts/verify-security-hardening.mjs" }
 ];
 
 async function main() {

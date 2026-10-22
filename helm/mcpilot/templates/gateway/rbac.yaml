@@ -16,10 +16,13 @@ metadata:
     {{- include "mcpilot.labels" . | nindent 4 }}
     app.kubernetes.io/component: gateway-provisioner
 rules:
-  # Multi-Store Provisioning permissions (BONUS-02, BONUS-04, BONUS-05, BONUS-06)
+  # Least-Privilege Multi-Store Provisioning permissions (SEC-02, BONUS-02)
   - apiGroups: [""]
     resources:
       - namespaces
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources:
       - resourcequotas
       - limitranges
       - secrets
@@ -28,21 +31,21 @@ rules:
       - pods
       - pods/status
       - configmaps
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
   - apiGroups: ["apps"]
     resources:
       - deployments
       - statefulsets
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
   - apiGroups: ["networking.k8s.io"]
     resources:
       - networkpolicies
       - ingresses
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
   - apiGroups: ["batch"]
     resources:
       - jobs
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

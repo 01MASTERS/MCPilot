@@ -2,6 +2,7 @@ import mysql from "mysql2/promise";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
+import { encryptCredential, decryptCredential, isEncrypted } from "./crypto-vault.js";
 
 dotenv.config();
 
@@ -111,6 +112,25 @@ export async function initDatabase(): Promise<void> {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  // Ensure auth_token column accommodates AES-256-GCM envelope and migrate plaintext (SEC-04)
+  try {
+    await db.query(`ALTER TABLE mcp_servers MODIFY auth_token TEXT NULL;`);
+  } catch (_err) {
+    // Column already modified
+  }
+
+  // In-place migration for any unencrypted legacy plaintext tokens
+  const [unencryptedServers] = await db.query<any[]>(
+    "SELECT id, auth_token FROM mcp_servers WHERE auth_token IS NOT NULL"
+  );
+  for (const s of unencryptedServers) {
+    if (s.auth_token && !isEncrypted(s.auth_token)) {
+      const encrypted = encryptCredential(s.auth_token);
+      await db.query("UPDATE mcp_servers SET auth_token = ? WHERE id = ?", [encrypted, s.id]);
+      console.log(`[mcpilot-gateway] Encrypted plaintext credentials at rest for server '${s.id}'`);
+    }
+  }
 
   // 2. Users table (AUTH-01)
   await db.query(`
@@ -317,7 +337,7 @@ export async function getEnabledServers(): Promise<McpServerRecord[]> {
     base_url: r.base_url,
     status: r.status,
     enabled: Boolean(r.enabled),
-    auth_token: r.auth_token,
+    auth_token: decryptCredential(r.auth_token),
     last_health_check: r.last_health_check ? new Date(r.last_health_check) : null,
     error_message: r.error_message,
   }));
@@ -332,7 +352,7 @@ export async function getAllServers(): Promise<McpServerRecord[]> {
     base_url: r.base_url,
     status: r.status,
     enabled: Boolean(r.enabled),
-    auth_token: r.auth_token,
+    auth_token: decryptCredential(r.auth_token),
     last_health_check: r.last_health_check ? new Date(r.last_health_check) : null,
     error_message: r.error_message,
   }));

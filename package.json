@@ -14,6 +14,7 @@
     "verify:observability": "node scripts/verify-observability.mjs",
     "verify:permissions": "node scripts/verify-tool-permissions.mjs",
     "verify:many-tools": "node scripts/verify-many-tools.mjs",
+    "verify:security-hardening": "node scripts/verify-security-hardening.mjs",
     "verify:all": "node scripts/verify-all.mjs"
   },
   "keywords": [

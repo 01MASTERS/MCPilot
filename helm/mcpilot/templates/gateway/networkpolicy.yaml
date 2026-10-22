@@ -1,0 +1,110 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-gateway-isolation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow incoming traffic from Traefik ingress controller in kube-system
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.service.port | default 8000 }}
+    # Allow local testing from within release namespace
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.service.port | default 8000 }}
+  egress:
+    # Allow DNS resolution to kube-system CoreDNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow Gateway connection to MariaDB in same namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mariadb
+      ports:
+        - protocol: TCP
+          port: 3306
+    # Allow Gateway connection to internal Upstream MCP servers
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: woocommerce-mcp
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: analytics-mcp
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: time-mcp
+      ports:
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 3001
+        - protocol: TCP
+          port: 3002
+    # Allow Gateway connection to dynamically provisioned store MCP servers in store-* namespaces
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: woocommerce-mcp
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Allow Gateway connection to Kubernetes API server for store provisioning
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mcpilot.fullname" . }}-mariadb-isolation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcpilot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mariadb
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow MariaDB access strictly from Gateway and WordPress
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: store
+      ports:
+        - protocol: TCP
+          port: 3306

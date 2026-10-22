@@ -3,6 +3,8 @@ import { getDbPool, getAllServers, McpServerRecord } from "./db.js";
 import { requireAuth, requireAdmin } from "./auth.js";
 import { UpstreamClientManager } from "./upstream-manager.js";
 import { ToolAggregator } from "./tool-aggregator.js";
+import { validateUpstreamUrl } from "./ssrf-validator.js";
+import { encryptCredential } from "./crypto-vault.js";
 
 export function createServersRouter(
   upstreamManager: UpstreamClientManager,
@@ -51,6 +53,16 @@ export function createServersRouter(
         return;
       }
 
+      // SSRF Validation against cloud metadata, loopback & internal k8s targets (SEC-01)
+      const urlCheck = validateUpstreamUrl(baseUrl);
+      if (!urlCheck.valid) {
+        res.status(400).json({ error: "SSRF_VIOLATION", message: urlCheck.reason });
+        return;
+      }
+
+      // Encrypt sensitive auth_token at rest in MariaDB (SEC-04)
+      const encryptedToken = authToken?.trim() ? encryptCredential(authToken.trim()) : null;
+
       // Generate id slug if not provided
       if (!id || typeof id !== "string" || !id.trim()) {
         id = name
@@ -74,7 +86,7 @@ export function createServersRouter(
       await db.query(
         `INSERT INTO mcp_servers (id, name, base_url, status, enabled, auth_token)
          VALUES (?, ?, ?, 'Connected', TRUE, ?)`,
-        [id, name.trim(), baseUrl.trim(), authToken?.trim() || null]
+        [id, name.trim(), baseUrl.trim(), encryptedToken]
       );
 
       const serverRecord: McpServerRecord = {
@@ -126,12 +138,18 @@ export function createServersRouter(
         values.push(name.trim());
       }
       if (baseUrl) {
+        // SSRF Validation on URL modification (SEC-01)
+        const urlCheck = validateUpstreamUrl(baseUrl);
+        if (!urlCheck.valid) {
+          res.status(400).json({ error: "SSRF_VIOLATION", message: urlCheck.reason });
+          return;
+        }
         updates.push("base_url = ?");
         values.push(baseUrl.trim());
       }
       if (authToken !== undefined) {
         updates.push("auth_token = ?");
-        values.push(authToken ? authToken.trim() : null);
+        values.push(authToken?.trim() ? encryptCredential(authToken.trim()) : null);
       }
 
       if (updates.length > 0) {
