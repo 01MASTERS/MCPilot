@@ -8,7 +8,7 @@
  * 4. Immediate rejection of subsequent requests using the revoked token with HTTP 401 Unauthorized.
  */
 
-const BASE_URL = process.env.GATEWAY_URL || "http://localhost:8000";
+const BASE_URL = process.env.GATEWAY_URL || "http://gateway.local.test:8080";
 
 async function parseMcpResponse(res) {
   const text = await res.text();

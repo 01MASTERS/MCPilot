@@ -12,7 +12,7 @@
 
 import { execSync } from "node:child_process";
 
-const BASE_URL = process.env.GATEWAY_URL || "http://localhost:8000";
+const BASE_URL = process.env.GATEWAY_URL || "http://gateway.local.test:8080";
 
 async function parseMcpResponse(res) {
   const text = await res.text();

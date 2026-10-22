@@ -19,6 +19,10 @@ spec:
         app.kubernetes.io/name: {{ include "mcpilot.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.gateway.service.port | default 8000 }}"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: {{ include "mcpilot.fullname" . }}-gateway
       securityContext:

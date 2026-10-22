@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { McpServerRecord, updateServerStatus } from "./db.js";
+import { recordUpstreamStatus } from "./metrics.js";
+import { classifyFailure } from "./failure-diagnostics.js";
 
 export interface UpstreamTool {
   serverId: string;
@@ -60,23 +62,36 @@ export class UpstreamClientManager {
   }
 
   /**
-   * Ping upstream server's /healthz or test connection
+   * Ping upstream server's /healthz or test connection with diagnostic classification (OBS-01, OBS-03)
    */
   async pingServer(server: McpServerRecord): Promise<boolean> {
-    try {
-      const url = new URL(server.base_url);
-      const healthUrl = `${url.protocol}//${url.host}/healthz`;
+    const url = new URL(server.base_url);
+    const healthUrl = `${url.protocol}//${url.host}/healthz`;
 
+    try {
       const res = await fetch(healthUrl, {
         method: "GET",
         signal: AbortSignal.timeout(3000),
       });
 
       const isHealthy = res.ok;
-      await updateServerStatus(server.id, isHealthy ? "Connected" : "Unreachable", isHealthy ? null : `HTTP ${res.status}`);
+      recordUpstreamStatus(server.id, server.name, isHealthy);
+
+      if (isHealthy) {
+        await updateServerStatus(server.id, "Connected", null);
+      } else {
+        const diag = classifyFailure(new Error(`HTTP ${res.status}`), {
+          serverId: server.id,
+          url: healthUrl,
+        });
+        await updateServerStatus(server.id, "Unreachable", diag.summary);
+      }
+
       return isHealthy;
     } catch (err: any) {
-      await updateServerStatus(server.id, "Unreachable", err.message || "Timeout connecting to healthz");
+      const diag = classifyFailure(err, { serverId: server.id, url: healthUrl });
+      recordUpstreamStatus(server.id, server.name, false);
+      await updateServerStatus(server.id, "Unreachable", diag.summary);
       await this.closeClient(server.id);
       return false;
     }
@@ -98,6 +113,7 @@ export class UpstreamClientManager {
       ]);
 
       await updateServerStatus(server.id, "Connected");
+      recordUpstreamStatus(server.id, server.name, true);
 
       const toolList: any[] = Array.isArray(result?.tools) ? result.tools : [];
 
@@ -111,14 +127,16 @@ export class UpstreamClientManager {
       }));
     } catch (err: any) {
       console.warn(`[upstream-manager] Could not fetch tools from '${server.id}':`, err.message || err);
-      await updateServerStatus(server.id, "Unreachable", err.message);
+      const diag = classifyFailure(err, { serverId: server.id, url: server.base_url });
+      recordUpstreamStatus(server.id, server.name, false);
+      await updateServerStatus(server.id, "Unreachable", diag.summary);
       await this.closeClient(server.id);
       return [];
     }
   }
 
   /**
-   * Execute tool on upstream server with 5-second timeout and fault isolation (GATE-06)
+   * Execute tool on upstream server with 5-second timeout, diagnostics, and fault isolation (GATE-06, OBS-03)
    */
   async executeTool(
     server: McpServerRecord,
@@ -138,13 +156,32 @@ export class UpstreamClientManager {
         ),
       ]);
 
+      const isError = Boolean(result?.isError);
+      if (isError) {
+        const errorText = Array.isArray(result?.content)
+          ? result.content.map((c: any) => c.text || JSON.stringify(c)).join(" ")
+          : JSON.stringify(result);
+        classifyFailure(new Error(errorText), {
+          serverId: server.id,
+          url: server.base_url,
+          toolName: originalToolName,
+        });
+      }
+
       return {
         content: Array.isArray(result?.content) ? result.content : [{ type: "text", text: JSON.stringify(result) }],
-        isError: Boolean(result?.isError),
+        isError,
       };
     } catch (err: any) {
       console.error(`[upstream-manager] Error calling tool '${originalToolName}' on '${server.id}':`, err.message || err);
-      await updateServerStatus(server.id, "Unreachable", err.message);
+      const diag = classifyFailure(err, {
+        serverId: server.id,
+        url: server.base_url,
+        toolName: originalToolName,
+      });
+
+      recordUpstreamStatus(server.id, server.name, false);
+      await updateServerStatus(server.id, "Unreachable", diag.summary);
       await this.closeClient(server.id);
 
       return {
@@ -152,10 +189,11 @@ export class UpstreamClientManager {
         content: [
           {
             type: "text",
-            text: `Upstream service error on '${server.id}': ${err.message || String(err)}`,
+            text: `Upstream error [${diag.code}] on '${server.id}': ${err.message || String(err)}\nRemediation: ${diag.remediation}`,
           },
         ],
       };
     }
   }
 }
+

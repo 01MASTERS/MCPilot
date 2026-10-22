@@ -16,7 +16,7 @@
 import { Client } from "../gateway/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
 import { StreamableHTTPClientTransport } from "../gateway/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js";
 
-const BASE_URL = process.env.GATEWAY_URL || "http://localhost:8000";
+const BASE_URL = process.env.GATEWAY_URL || "http://gateway.local.test:8080";
 
 async function main() {
   console.log("\n=======================================================");

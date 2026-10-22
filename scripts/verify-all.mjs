@@ -18,10 +18,12 @@ const SUITES = [
   { name: "VERIF-04: Fault Isolation & Pod Kill Resilience", script: "scripts/verify-fault-isolation.mjs" },
   { name: "INFRA-06: Container Security & Non-Root Contexts", script: "scripts/verify-security.mjs" },
   { name: "AUTH-01/04: Team Member Management & Server Editing", script: "scripts/verify-team-mgmt.mjs" },
-  { name: "BONUS-01..07: Multi-Store Provisioning Platform", script: "scripts/verify-multi-store.mjs" }
+  { name: "BONUS-01..07: Multi-Store Provisioning Platform", script: "scripts/verify-multi-store.mjs" },
+  { name: "OBS-01..04: Gateway Observability & Telemetry", script: "scripts/verify-observability.mjs" }
 ];
 
 async function main() {
+  process.env.GATEWAY_URL = process.env.GATEWAY_URL || "http://gateway.local.test:8080";
   console.log("\n==================================================================");
   console.log("       MCPilot — MASTER END-TO-END VERIFICATION SUITE");
   console.log("==================================================================\n");

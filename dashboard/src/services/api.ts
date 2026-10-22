@@ -291,3 +291,28 @@ export async function deleteStore(id: string): Promise<{ message: string }> {
   }
   return res.json();
 }
+
+// Observability & Diagnostics API methods (OBS-01, OBS-02, OBS-03)
+
+export async function fetchMetricsSummary(): Promise<any> {
+  const res = await fetch("/api/metrics/summary", {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to fetch metrics summary" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchDiagnostics(serverId?: string): Promise<{ diagnostics: any[] }> {
+  const query = serverId ? `?serverId=${encodeURIComponent(serverId)}` : "";
+  const res = await fetch(`/api/diagnostics${query}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to fetch diagnostics" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}

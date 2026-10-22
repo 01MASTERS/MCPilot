@@ -11,7 +11,7 @@
  * 7. RBAC enforcement: member account cannot invite users or edit upstream servers (403 Forbidden).
  */
 
-const BASE_URL = process.env.GATEWAY_URL || "http://localhost:8000";
+const BASE_URL = process.env.GATEWAY_URL || "http://gateway.local.test:8080";
 
 async function parseMcpResponse(res) {
   const text = await res.text();

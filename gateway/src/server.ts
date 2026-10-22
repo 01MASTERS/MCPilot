@@ -21,6 +21,9 @@ import { createServersRouter } from "./servers-api.js";
 import { createAuditRouter, logToolInvocation } from "./audit.js";
 import { createChatRouter } from "./chat-agent.js";
 import { createStoresRouter } from "./stores-api.js";
+import { register, recordToolCall, getMetricsSummary, hydrateMetricsFromDb } from "./metrics.js";
+import { getDiagnostics, getLatestDiagnosticForServer, classifyFailure } from "./failure-diagnostics.js";
+import { getDbPool } from "./db.js";
 
 dotenv.config();
 
@@ -57,18 +60,20 @@ export function createGatewayServer(
     return { tools };
   });
 
-  // Dynamic namespaced tool call routing handler (GATE-01, GATE-02, GATE-06) + Granular Audit Logging (AUTH-05)
+  // Dynamic namespaced tool call routing handler (GATE-01, GATE-02, GATE-06) + Granular Audit Logging (AUTH-05) + Metrics (OBS-01)
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const startTime = Date.now();
     const toolName = request.params.name;
     const args = request.params.arguments;
     const separatorIdx = toolName.indexOf("__");
-    const serverId = separatorIdx !== -1 ? toolName.slice(0, separatorIdx) : null;
+    const serverId = separatorIdx !== -1 ? toolName.slice(0, separatorIdx) : "gateway";
 
     try {
       const result = await toolAggregator.dispatchCall(toolName, args);
       const durationMs = Date.now() - startTime;
       const isError = Boolean(result.isError);
+
+      recordToolCall(serverId, toolName, durationMs, isError, isError ? "TOOL_ERROR" : "NONE");
 
       logToolInvocation({
         userId: caller?.userId,
@@ -85,6 +90,9 @@ export function createGatewayServer(
       return result;
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
+      const diag = classifyFailure(err, { serverId, toolName });
+      recordToolCall(serverId, toolName, durationMs, true, diag.category);
+
       logToolInvocation({
         userId: caller?.userId,
         username: caller?.username,
@@ -155,6 +163,47 @@ export function startGatewayApp(
         error: err.message || String(err),
       });
     }
+  });
+
+  // Prometheus Scrape Endpoint (OBS-01)
+  app.get("/metrics", async (_req: Request, res: Response) => {
+    try {
+      res.setHeader("Content-Type", register.contentType);
+      res.send(await register.metrics());
+    } catch (err: any) {
+      res.status(500).send(err.message || String(err));
+    }
+  });
+
+  // Aggregated Observability Metrics API (OBS-02)
+  app.get("/api/metrics/summary", async (_req: Request, res: Response) => {
+    try {
+      const servers = await getAllServers();
+      const summary = getMetricsSummary(
+        servers.map((s) => ({ id: s.id, name: s.name, status: s.status }))
+      );
+      res.status(200).json(summary);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  // Failure Diagnostics History & Inspection (OBS-03)
+  app.get("/api/diagnostics", (req: Request, res: Response) => {
+    const serverId = req.query.serverId ? String(req.query.serverId) : undefined;
+    const category = req.query.category as any;
+    const reports = getDiagnostics({ serverId, category });
+    res.status(200).json({ diagnostics: reports });
+  });
+
+  app.get("/api/diagnostics/:serverId", (req: Request, res: Response) => {
+    const serverId = String(req.params.serverId);
+    const report = getLatestDiagnosticForServer(serverId);
+    if (!report) {
+      res.status(404).json({ error: `No recent diagnostic reports for server '${serverId}'` });
+      return;
+    }
+    res.status(200).json({ diagnostic: report });
   });
 
   // Session store for stateful Streamable HTTP clients
@@ -271,6 +320,7 @@ async function main() {
   try {
     console.log("[mcpilot-gateway] Connecting to MariaDB and initializing tables...");
     await initDatabase();
+    await hydrateMetricsFromDb(getDbPool());
 
     const upstreamManager = new UpstreamClientManager();
     const toolAggregator = new ToolAggregator(upstreamManager);

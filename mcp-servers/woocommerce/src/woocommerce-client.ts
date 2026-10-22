@@ -26,6 +26,7 @@ export class WooCommerceClient {
       Authorization: this.authHeader,
       "Content-Type": "application/json",
       Accept: "application/json",
+      "X-Forwarded-Proto": "https",
       ...(options.headers as Record<string, string> || {}),
     };
 

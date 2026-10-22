@@ -71,3 +71,54 @@ export interface StoreEnvironment {
   errorMessage?: string | null;
   toolCount: number;
 }
+
+export interface DiagnosticReport {
+  code: string;
+  category: "NETWORK" | "TIMEOUT" | "HTTP" | "PROTOCOL" | "VALIDATION" | "KUBERNETES";
+  summary: string;
+  technicalDetails: string;
+  remediation: string;
+  targetServerId: string;
+  targetUrl?: string;
+  toolName?: string;
+  timestamp: string;
+  rawError: string;
+  httpStatus?: number;
+}
+
+export interface ServerMetric {
+  id: string;
+  name: string;
+  status: "Connected" | "Unreachable" | "Disabled";
+  totalCalls: number;
+  successfulCalls: number;
+  errorCalls: number;
+  errorRate: string;
+  errorRateNum: number;
+  latency: {
+    min: number;
+    max: number;
+    avg: number;
+    p50: number;
+    p90: number;
+    p95: number;
+    p99: number;
+  };
+  lastInvocation?: string | null;
+}
+
+export interface MetricsSummary {
+  timestamp: string;
+  overview: {
+    totalInvocations: number;
+    successfulInvocations: number;
+    failedInvocations: number;
+    overallErrorRate: string;
+    avgLatencyMs: number;
+    p95LatencyMs: number;
+    connectedUpstreams: number;
+    totalUpstreams: number;
+    uptimeSeconds: number;
+  };
+  servers: ServerMetric[];
+}
