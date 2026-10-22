@@ -63,6 +63,18 @@ export interface StoreRecord {
   error_message?: string | null;
 }
 
+export interface ToolPermissionRecord {
+  id: string;
+  target_type: "role" | "user";
+  target_id: string;
+  server_id: string;
+  tool_name: string;
+  permission: "allow" | "deny";
+  description?: string | null;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
 let pool: mysql.Pool | null = null;
 
 export function getDbPool(): mysql.Pool {
@@ -165,6 +177,84 @@ export async function initDatabase(): Promise<void> {
       INDEX idx_created_by (created_by)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  // 6. Tool Permissions table (PERM-01)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS tool_permissions (
+      id VARCHAR(64) PRIMARY KEY,
+      target_type ENUM('role', 'user') NOT NULL,
+      target_id VARCHAR(64) NOT NULL,
+      server_id VARCHAR(64) NOT NULL,
+      tool_name VARCHAR(128) NOT NULL,
+      permission ENUM('allow', 'deny') NOT NULL DEFAULT 'allow',
+      description VARCHAR(255) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_target_server_tool (target_type, target_id, server_id, tool_name),
+      INDEX idx_target (target_type, target_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  // Seed default tool permissions if empty
+  const [permRows] = await db.query<any[]>("SELECT COUNT(*) as cnt FROM tool_permissions");
+  if (permRows[0].cnt === 0) {
+    const defaultPerms = [
+      {
+        id: randomUUID(),
+        target_type: "role",
+        target_id: "admin",
+        server_id: "*",
+        tool_name: "*",
+        permission: "allow",
+        description: "Administrators have full access to all servers and tools",
+      },
+      {
+        id: randomUUID(),
+        target_type: "role",
+        target_id: "member",
+        server_id: "woocommerce",
+        tool_name: "create_product",
+        permission: "deny",
+        description: "Members cannot create catalog products",
+      },
+      {
+        id: randomUUID(),
+        target_type: "role",
+        target_id: "member",
+        server_id: "woocommerce",
+        tool_name: "update_order_status",
+        permission: "deny",
+        description: "Members cannot alter order statuses",
+      },
+      {
+        id: randomUUID(),
+        target_type: "role",
+        target_id: "member",
+        server_id: "store_*",
+        tool_name: "create_product",
+        permission: "deny",
+        description: "Members cannot create tenant store products",
+      },
+      {
+        id: randomUUID(),
+        target_type: "role",
+        target_id: "member",
+        server_id: "store_*",
+        tool_name: "update_order_status",
+        permission: "deny",
+        description: "Members cannot alter tenant store order statuses",
+      },
+    ];
+
+    for (const p of defaultPerms) {
+      await db.query(
+        `INSERT INTO tool_permissions (id, target_type, target_id, server_id, tool_name, permission, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [p.id, p.target_type, p.target_id, p.server_id, p.tool_name, p.permission, p.description]
+      );
+    }
+    console.log("[mcpilot-gateway] Seeded default tool permissions matrix");
+  }
 
   // Pre-seed default upstream servers if table is empty
   const [serverRows] = await db.query<any[]>("SELECT COUNT(*) as cnt FROM mcp_servers");
@@ -359,4 +449,109 @@ export async function countActiveStoresByUser(userId: string): Promise<number> {
     [userId]
   );
   return rows[0]?.cnt || 0;
+}
+
+// Tool Permissions Data Access (PERM-01, PERM-04)
+
+export async function getAllToolPermissions(): Promise<ToolPermissionRecord[]> {
+  const db = getDbPool();
+  const [rows] = await db.query<any[]>(
+    "SELECT * FROM tool_permissions ORDER BY target_type ASC, target_id ASC, server_id ASC"
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    target_type: r.target_type,
+    target_id: r.target_id,
+    server_id: r.server_id,
+    tool_name: r.tool_name,
+    permission: r.permission,
+    description: r.description,
+    created_at: r.created_at ? new Date(r.created_at) : undefined,
+    updated_at: r.updated_at ? new Date(r.updated_at) : undefined,
+  }));
+}
+
+export async function upsertToolPermission(perm: {
+  targetType: "role" | "user";
+  targetId: string;
+  serverId: string;
+  toolName: string;
+  permission: "allow" | "deny";
+  description?: string;
+}): Promise<string> {
+  const db = getDbPool();
+  const id = randomUUID();
+  await db.query(
+    `INSERT INTO tool_permissions (id, target_type, target_id, server_id, tool_name, permission, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE permission = VALUES(permission), description = VALUES(description), updated_at = NOW()`,
+    [id, perm.targetType, perm.targetId, perm.serverId, perm.toolName, perm.permission, perm.description || null]
+  );
+  return id;
+}
+
+export async function deleteToolPermission(id: string): Promise<void> {
+  const db = getDbPool();
+  await db.query("DELETE FROM tool_permissions WHERE id = ?", [id]);
+}
+
+export async function resetToolPermissionsToDefaults(): Promise<void> {
+  const db = getDbPool();
+  await db.query("DELETE FROM tool_permissions");
+
+  const defaultPerms = [
+    {
+      id: randomUUID(),
+      target_type: "role",
+      target_id: "admin",
+      server_id: "*",
+      tool_name: "*",
+      permission: "allow",
+      description: "Administrators have full access to all servers and tools",
+    },
+    {
+      id: randomUUID(),
+      target_type: "role",
+      target_id: "member",
+      server_id: "woocommerce",
+      tool_name: "create_product",
+      permission: "deny",
+      description: "Members cannot create catalog products",
+    },
+    {
+      id: randomUUID(),
+      target_type: "role",
+      target_id: "member",
+      server_id: "woocommerce",
+      tool_name: "update_order_status",
+      permission: "deny",
+      description: "Members cannot alter order statuses",
+    },
+    {
+      id: randomUUID(),
+      target_type: "role",
+      target_id: "member",
+      server_id: "store_*",
+      tool_name: "create_product",
+      permission: "deny",
+      description: "Members cannot create tenant store products",
+    },
+    {
+      id: randomUUID(),
+      target_type: "role",
+      target_id: "member",
+      server_id: "store_*",
+      tool_name: "update_order_status",
+      permission: "deny",
+      description: "Members cannot alter tenant store order statuses",
+    },
+  ];
+
+  for (const p of defaultPerms) {
+    await db.query(
+      `INSERT INTO tool_permissions (id, target_type, target_id, server_id, tool_name, permission, description)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [p.id, p.target_type, p.target_id, p.server_id, p.tool_name, p.permission, p.description]
+    );
+  }
 }

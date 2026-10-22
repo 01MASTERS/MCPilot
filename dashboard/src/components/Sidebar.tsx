@@ -11,11 +11,12 @@ import {
   Cpu,
   Storefront,
   Pulse,
+  ShieldCheck,
 } from "@phosphor-icons/react";
 
 interface SidebarProps {
-  activeTab: "servers" | "stores" | "observability" | "keys" | "audit" | "chat";
-  setActiveTab: (tab: "servers" | "stores" | "observability" | "keys" | "audit" | "chat") => void;
+  activeTab: "servers" | "stores" | "observability" | "permissions" | "keys" | "audit" | "chat";
+  setActiveTab: (tab: "servers" | "stores" | "observability" | "permissions" | "keys" | "audit" | "chat") => void;
   currentUser: User;
   onLogout: () => void;
 }
@@ -39,6 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "servers", label: "Servers & Tools", icon: Globe },
     { id: "stores", label: "Store Environments", icon: Storefront },
     { id: "observability", label: "Observability", icon: Pulse },
+    { id: "permissions", label: "Tool Permissions", icon: ShieldCheck },
     { id: "keys", label: "API Keys", icon: Key },
     { id: "audit", label: "Audit Trail", icon: Scroll },
     { id: "chat", label: "Chat Agent", icon: ChatCircleDots },

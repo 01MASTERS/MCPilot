@@ -16,12 +16,13 @@ import { ApiKeysView } from "./components/ApiKeysView";
 import { AuditView } from "./components/AuditView";
 import { ChatAgent } from "./components/ChatAgent";
 import { ObservabilityView } from "./components/ObservabilityView";
+import { PermissionsView } from "./components/PermissionsView";
 
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<"servers" | "stores" | "observability" | "keys" | "audit" | "chat">("servers");
+  const [activeTab, setActiveTab] = useState<"servers" | "stores" | "observability" | "permissions" | "keys" | "audit" | "chat">("servers");
   const [servers, setServers] = useState<McpServer[]>([]);
   const [tools, setTools] = useState<McpTool[]>([]);
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -93,6 +94,7 @@ export function App() {
     servers: "Upstream MCP Servers & Aggregated Catalog",
     stores: "Multi-Store Environments & Automated Provisioning",
     observability: "Real-time Observability, Latency Quantiles & Failure Diagnostics",
+    permissions: "Tool Permissions, Visibility Filtering & Policy Engine",
     keys: "Team Access Control & API Key Lifecycle",
     audit: "Granular Audit Trail & Trace Inspector",
     chat: "Interactive Chat Agent & Federated Tool Invocation",
@@ -131,6 +133,10 @@ export function App() {
           )}
 
           {activeTab === "observability" && <ObservabilityView />}
+
+          {activeTab === "permissions" && (
+            <PermissionsView currentUser={currentUser} />
+          )}
 
           {activeTab === "keys" && (
             <ApiKeysView

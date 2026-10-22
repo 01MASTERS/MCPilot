@@ -19,7 +19,8 @@ const SUITES = [
   { name: "INFRA-06: Container Security & Non-Root Contexts", script: "scripts/verify-security.mjs" },
   { name: "AUTH-01/04: Team Member Management & Server Editing", script: "scripts/verify-team-mgmt.mjs" },
   { name: "BONUS-01..07: Multi-Store Provisioning Platform", script: "scripts/verify-multi-store.mjs" },
-  { name: "OBS-01..04: Gateway Observability & Telemetry", script: "scripts/verify-observability.mjs" }
+  { name: "OBS-01..04: Gateway Observability & Telemetry", script: "scripts/verify-observability.mjs" },
+  { name: "PERM-01..05: Tool Permissions & Role-Based Filtering", script: "scripts/verify-tool-permissions.mjs" }
 ];
 
 async function main() {

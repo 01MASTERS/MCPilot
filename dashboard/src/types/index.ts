@@ -122,3 +122,41 @@ export interface MetricsSummary {
   };
   servers: ServerMetric[];
 }
+
+export interface ToolPermission {
+  id: string;
+  target_type: "role" | "user";
+  target_id: string;
+  server_id: string;
+  tool_name: string;
+  permission: "allow" | "deny";
+  description?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EffectiveToolPermission {
+  name: string;
+  serverId: string;
+  rawToolName: string;
+  description: string;
+  isMutating: boolean;
+  adminAllowed: boolean;
+  memberAllowed: boolean;
+}
+
+export interface PermissionsResponse {
+  policies: ToolPermission[];
+  matrix: EffectiveToolPermission[];
+  tools: McpTool[];
+}
+
+export interface ToolPermissionUpdatePayload {
+  targetType: "role" | "user";
+  targetId: string;
+  serverId: string;
+  toolName: string;
+  permission: "allow" | "deny";
+  description?: string;
+}
+

@@ -21,8 +21,15 @@ import { createServersRouter } from "./servers-api.js";
 import { createAuditRouter, logToolInvocation } from "./audit.js";
 import { createChatRouter } from "./chat-agent.js";
 import { createStoresRouter } from "./stores-api.js";
+import { createPermissionsRouter } from "./permissions-api.js";
 import { register, recordToolCall, getMetricsSummary, hydrateMetricsFromDb } from "./metrics.js";
 import { getDiagnostics, getLatestDiagnosticForServer, classifyFailure } from "./failure-diagnostics.js";
+import {
+  loadPermissionsFromDb,
+  canAccessTool,
+  filterToolsForCaller,
+  splitNamespacedTool,
+} from "./permissions.js";
 import { getDbPool } from "./db.js";
 
 dotenv.config();
@@ -33,6 +40,7 @@ const __dirname = path.dirname(__filename);
 export interface CallerContext {
   userId?: string | null;
   username?: string | null;
+  role?: "admin" | "member";
   apiKeyId?: string | null;
 }
 
@@ -54,19 +62,56 @@ export function createGatewayServer(
     }
   );
 
-  // Dynamic tool aggregation handler (GATE-04, GATE-05)
+  // Dynamic tool aggregation handler (GATE-04, GATE-05) with RBAC filtering (PERM-02)
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = await toolAggregator.getAllNamespacedTools();
+    if (caller?.role) {
+      const authUser = {
+        userId: caller.userId || "anonymous",
+        username: caller.username || "anonymous",
+        role: caller.role,
+      };
+      return { tools: filterToolsForCaller(tools, authUser) };
+    }
     return { tools };
   });
 
-  // Dynamic namespaced tool call routing handler (GATE-01, GATE-02, GATE-06) + Granular Audit Logging (AUTH-05) + Metrics (OBS-01)
+  // Dynamic namespaced tool call routing handler (GATE-01, GATE-02, GATE-06) + Granular Audit Logging (AUTH-05) + Metrics (OBS-01) + RBAC Enforcement (PERM-03)
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const startTime = Date.now();
     const toolName = request.params.name;
     const args = request.params.arguments;
-    const separatorIdx = toolName.indexOf("__");
-    const serverId = separatorIdx !== -1 ? toolName.slice(0, separatorIdx) : "gateway";
+    const { serverId, rawToolName } = splitNamespacedTool(toolName);
+
+    // Permission enforcement check (PERM-03)
+    if (caller?.role) {
+      const authUser = {
+        userId: caller.userId || "anonymous",
+        username: caller.username || "anonymous",
+        role: caller.role,
+      };
+      const allowed = canAccessTool(authUser, serverId, rawToolName);
+      if (!allowed) {
+        const errorMsg = `Forbidden: User '${caller.username || caller.userId}' with role '${caller.role}' is not authorized to execute tool '${toolName}'`;
+        recordToolCall(serverId, toolName, 0, true, "PERMISSION_DENIED");
+        logToolInvocation({
+          userId: caller?.userId,
+          username: caller?.username,
+          apiKeyId: caller?.apiKeyId,
+          serverId,
+          toolName,
+          args,
+          status: "error",
+          durationMs: 0,
+          errorMessage: errorMsg,
+        }).catch((err) => console.error("[mcpilot-gateway] Audit log write failed:", err));
+
+        return {
+          content: [{ type: "text", text: errorMsg }],
+          isError: true,
+        };
+      }
+    }
 
     try {
       const result = await toolAggregator.dispatchCall(toolName, args);
@@ -132,6 +177,7 @@ export function startGatewayApp(
   app.use("/api/audit", createAuditRouter());
   app.use("/api/chat", createChatRouter(toolAggregator));
   app.use("/api/stores", createStoresRouter(toolAggregator));
+  app.use("/api/permissions", createPermissionsRouter(toolAggregator));
 
   // Health check endpoint displaying Gateway status and upstream server states (GATE-07)
   app.get("/healthz", async (_req: Request, res: Response) => {
@@ -215,6 +261,7 @@ export function startGatewayApp(
       const caller: CallerContext = {
         userId: req.user?.userId,
         username: req.user?.username,
+        role: req.user?.role,
         apiKeyId: req.apiKey?.id,
       };
 
@@ -320,6 +367,7 @@ async function main() {
   try {
     console.log("[mcpilot-gateway] Connecting to MariaDB and initializing tables...");
     await initDatabase();
+    await loadPermissionsFromDb();
     await hydrateMetricsFromDb(getDbPool());
 
     const upstreamManager = new UpstreamClientManager();

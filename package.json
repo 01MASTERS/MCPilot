@@ -12,6 +12,7 @@
     "verify:team": "node scripts/verify-team-mgmt.mjs",
     "verify:bonus": "node scripts/verify-multi-store.mjs",
     "verify:observability": "node scripts/verify-observability.mjs",
+    "verify:permissions": "node scripts/verify-tool-permissions.mjs",
     "verify:all": "node scripts/verify-all.mjs"
   },
   "keywords": [

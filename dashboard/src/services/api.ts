@@ -1,4 +1,16 @@
-import type { User, TeamMember, McpServer, McpTool, ApiKey, AuditLog, StoreEnvironment } from "../types";
+import type {
+  User,
+  TeamMember,
+  McpServer,
+  McpTool,
+  ApiKey,
+  AuditLog,
+  StoreEnvironment,
+  ToolPermission,
+  EffectiveToolPermission,
+  PermissionsResponse,
+  ToolPermissionUpdatePayload,
+} from "../types";
 
 const TOKEN_KEY = "mcpilot_jwt_token";
 
@@ -316,3 +328,56 @@ export async function fetchDiagnostics(serverId?: string): Promise<{ diagnostics
   }
   return res.json();
 }
+
+// Tool Permissions & RBAC API methods (PERM-04)
+
+export async function fetchPermissions(): Promise<PermissionsResponse> {
+  const res = await fetch("/api/permissions", {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to fetch permissions" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateToolPermission(
+  payload: ToolPermissionUpdatePayload
+): Promise<{ success: boolean; id: string; message: string }> {
+  const res = await fetch("/api/permissions", {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to update tool permission" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function resetPermissionsToDefaults(): Promise<{ success: boolean; message: string }> {
+  const res = await fetch("/api/permissions/reset", {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to reset permissions" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteToolPermission(id: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`/api/permissions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to delete permission" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
