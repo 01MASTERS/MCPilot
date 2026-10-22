@@ -382,7 +382,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-[#EDEDED]">Handling Many Tools: Meta-Tool Architecture</span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-[#00DF8F]/10 text-[#00DF8F] border border-[#00DF8F]/30 rounded">
-                  Page 6 Stand-Out Item 4
+                  Context Window Optimizer
                 </span>
               </div>
               <p className="text-xs text-[#888888] mt-0.5">
