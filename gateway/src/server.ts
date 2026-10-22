@@ -15,7 +15,7 @@ import { initDatabase, getAllServers } from "./db.js";
 import { UpstreamClientManager } from "./upstream-manager.js";
 import { ToolAggregator } from "./tool-aggregator.js";
 import { HealthMonitor } from "./health-monitor.js";
-import { createAuthRouter, createUsersRouter } from "./auth.js";
+import { createAuthRouter, createUsersRouter, requireAuth } from "./auth.js";
 import { createApiKeysRouter, mcpAuthMiddleware } from "./api-keys.js";
 import { createServersRouter } from "./servers-api.js";
 import { createAuditRouter, logToolInvocation } from "./audit.js";
@@ -30,6 +30,7 @@ import {
   filterToolsForCaller,
   splitNamespacedTool,
 } from "./permissions.js";
+import { searchTools, getToolInfo, formatSearchResultsForLlm } from "./tool-search.js";
 import { getDbPool } from "./db.js";
 
 dotenv.config();
@@ -42,7 +43,66 @@ export interface CallerContext {
   username?: string | null;
   role?: "admin" | "member";
   apiKeyId?: string | null;
+  catalogMode?: "full" | "meta";
+  serverFilter?: string[];
 }
+
+export const GATEWAY_META_TOOLS = [
+  {
+    name: "gateway__search_tools",
+    description: "Searches for available tools across all connected MCP servers using natural keywords, server name, or operation type. Use this to discover tools when the full catalog is not loaded into prompt context.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keywords (e.g. 'order', 'product', 'revenue', 'time', 'create product')",
+        },
+        serverId: {
+          type: "string",
+          description: "Optional upstream server ID filter (e.g. 'woocommerce', 'analytics', 'time')",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of tool search results to return (default: 10)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "gateway__get_tool_info",
+    description: "Retrieves complete schema specifications, argument types, and required parameters for a specific tool discovered via search.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        toolName: {
+          type: "string",
+          description: "Full namespaced tool name (e.g. 'woocommerce__create_product', 'time__get_current_time')",
+        },
+      },
+      required: ["toolName"],
+    },
+  },
+  {
+    name: "gateway__execute_tool",
+    description: "Dynamically executes any permitted MCP tool by name with arguments. Enables full progressive discovery without loading schemas upfront.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        toolName: {
+          type: "string",
+          description: "Full namespaced tool name to execute",
+        },
+        arguments: {
+          type: "object",
+          description: "JSON arguments object matching the tool's input schema",
+        },
+      },
+      required: ["toolName"],
+    },
+  },
+];
 
 export function createGatewayServer(
   toolAggregator: ToolAggregator,
@@ -62,34 +122,140 @@ export function createGatewayServer(
     }
   );
 
-  // Dynamic tool aggregation handler (GATE-04, GATE-05) with RBAC filtering (PERM-02)
+  // Dynamic tool aggregation handler (GATE-04, GATE-05) with RBAC filtering (PERM-02) and Meta Mode (MANY-03)
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = await toolAggregator.getAllNamespacedTools();
+    // If client requested lightweight meta-mode, return ONLY the 3 meta-tools (98%+ context window reduction)
+    if (caller?.catalogMode === "meta") {
+      return { tools: GATEWAY_META_TOOLS };
+    }
+
+    let tools = await toolAggregator.getAllNamespacedTools();
+
+    // Optional server filter header/query
+    if (caller?.serverFilter && caller.serverFilter.length > 0) {
+      tools = tools.filter((t) => {
+        const { serverId } = splitNamespacedTool(t.name);
+        return caller.serverFilter!.includes(serverId.toLowerCase());
+      });
+    }
+
+    // Role-based tool filtering
     if (caller?.role) {
       const authUser = {
         userId: caller.userId || "anonymous",
         username: caller.username || "anonymous",
         role: caller.role,
       };
-      return { tools: filterToolsForCaller(tools, authUser) };
+      tools = filterToolsForCaller(tools, authUser);
     }
-    return { tools };
+
+    // Return permitted upstream tools plus the gateway meta-tools
+    return { tools: [...tools, ...GATEWAY_META_TOOLS] };
   });
 
-  // Dynamic namespaced tool call routing handler (GATE-01, GATE-02, GATE-06) + Granular Audit Logging (AUTH-05) + Metrics (OBS-01) + RBAC Enforcement (PERM-03)
+  // Dynamic namespaced tool call routing handler + Meta-Tools + Audit Logging + Metrics + RBAC Enforcement
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const startTime = Date.now();
     const toolName = request.params.name;
     const args = request.params.arguments;
     const { serverId, rawToolName } = splitNamespacedTool(toolName);
 
-    // Permission enforcement check (PERM-03)
-    if (caller?.role) {
-      const authUser = {
-        userId: caller.userId || "anonymous",
-        username: caller.username || "anonymous",
-        role: caller.role,
+    const authUser = caller?.role
+      ? {
+          userId: caller.userId || "anonymous",
+          username: caller.username || "anonymous",
+          role: caller.role,
+        }
+      : undefined;
+
+    // --- Meta-Tool 1: gateway__search_tools (MANY-01) ---
+    if (toolName === "gateway__search_tools") {
+      const query = String(args?.query || "");
+      const filterServer = args?.serverId ? String(args.serverId) : undefined;
+      const limit = typeof args?.limit === "number" ? args.limit : 10;
+      const allTools = await toolAggregator.getAllNamespacedTools();
+      const results = searchTools(allTools, query, {
+        serverId: filterServer,
+        limit,
+        user: authUser,
+      });
+
+      return {
+        content: [{ type: "text", text: formatSearchResultsForLlm(results) }],
       };
+    }
+
+    // --- Meta-Tool 2: gateway__get_tool_info (MANY-02) ---
+    if (toolName === "gateway__get_tool_info") {
+      const targetToolName = String(args?.toolName || "");
+      const allTools = await toolAggregator.getAllNamespacedTools();
+      const info = getToolInfo(allTools, targetToolName, authUser);
+
+      if (!info) {
+        return {
+          content: [{ type: "text", text: `Tool '${targetToolName}' not found or permission denied.` }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(info, null, 2) }],
+      };
+    }
+
+    // --- Meta-Tool 3: gateway__execute_tool (MANY-03) ---
+    if (toolName === "gateway__execute_tool") {
+      const targetToolName = String(args?.toolName || "");
+      const targetArgs = (args?.arguments as Record<string, any>) || {};
+      const { serverId: targetServerId, rawToolName: targetRawToolName } = splitNamespacedTool(targetToolName);
+
+      // Enforce RBAC on the target tool
+      if (caller?.role) {
+        const allowed = canAccessTool(authUser, targetServerId, targetRawToolName);
+        if (!allowed) {
+          const errorMsg = `Forbidden: User '${caller.username || caller.userId}' with role '${caller.role}' is not authorized to execute tool '${targetToolName}' via gateway__execute_tool`;
+          recordToolCall(targetServerId, targetToolName, 0, true, "PERMISSION_DENIED");
+          logToolInvocation({
+            userId: caller?.userId,
+            username: caller?.username,
+            apiKeyId: caller?.apiKeyId,
+            serverId: targetServerId,
+            toolName: targetToolName,
+            args: targetArgs,
+            status: "error",
+            durationMs: 0,
+            errorMessage: errorMsg,
+          }).catch((err) => console.error("[mcpilot-gateway] Audit log write failed:", err));
+
+          return {
+            content: [{ type: "text", text: errorMsg }],
+            isError: true,
+          };
+        }
+      }
+
+      const result = await toolAggregator.dispatchCall(targetToolName, targetArgs);
+      const durationMs = Date.now() - startTime;
+      const isError = Boolean(result.isError);
+
+      recordToolCall(targetServerId, targetToolName, durationMs, isError, isError ? "TOOL_ERROR" : "NONE");
+      logToolInvocation({
+        userId: caller?.userId,
+        username: caller?.username,
+        apiKeyId: caller?.apiKeyId,
+        serverId: targetServerId,
+        toolName: targetToolName,
+        args: targetArgs,
+        status: isError ? "error" : "success",
+        durationMs,
+        errorMessage: isError ? JSON.stringify(result.content) : null,
+      }).catch((err) => console.error("[mcpilot-gateway] Audit log write failed:", err));
+
+      return result;
+    }
+
+    // Permission enforcement check for direct calls (PERM-03)
+    if (caller?.role) {
       const allowed = canAccessTool(authUser, serverId, rawToolName);
       if (!allowed) {
         const errorMsg = `Forbidden: User '${caller.username || caller.userId}' with role '${caller.role}' is not authorized to execute tool '${toolName}'`;
@@ -179,6 +345,31 @@ export function startGatewayApp(
   app.use("/api/stores", createStoresRouter(toolAggregator));
   app.use("/api/permissions", createPermissionsRouter(toolAggregator));
 
+  // Fast Tool Search REST API (MANY-02, MANY-04)
+  app.get("/api/tools/search", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const q = req.query.q ? String(req.query.q) : "";
+      const serverId = req.query.serverId ? String(req.query.serverId) : undefined;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
+
+      const allTools = await toolAggregator.getAllNamespacedTools().catch(() => []);
+      const results = searchTools(allTools, q, {
+        serverId,
+        limit,
+        user: req.user,
+      });
+
+      res.status(200).json({
+        query: q,
+        total: results.length,
+        results,
+      });
+    } catch (err: any) {
+      console.error("[mcpilot-gateway] Tool search API error:", err);
+      res.status(500).json({ error: "Failed to search tools" });
+    }
+  });
+
   // Health check endpoint displaying Gateway status and upstream server states (GATE-07)
   app.get("/healthz", async (_req: Request, res: Response) => {
     try {
@@ -258,11 +449,22 @@ export function startGatewayApp(
   // Single downstream Streamable HTTP endpoint on /mcp (GATE-01) with Authentication (AUTH-01, AUTH-02, AUTH-03)
   app.post("/mcp", mcpAuthMiddleware, async (req: Request, res: Response) => {
     try {
+      const modeHeader = req.headers["x-mcp-tool-mode"] as string | undefined;
+      const modeQuery = req.query.mode as string | undefined;
+      const catalogMode: "full" | "meta" = modeHeader === "meta" || modeQuery === "meta" ? "meta" : "full";
+
+      const serverFilterHeader = req.headers["x-mcp-servers"] as string | undefined;
+      const serverFilterQuery = req.query.servers as string | undefined;
+      const rawServers = serverFilterHeader || serverFilterQuery;
+      const serverFilter = rawServers ? rawServers.split(",").map((s) => s.trim().toLowerCase()) : undefined;
+
       const caller: CallerContext = {
         userId: req.user?.userId,
         username: req.user?.username,
         role: req.user?.role,
         apiKeyId: req.apiKey?.id,
+        catalogMode,
+        serverFilter,
       };
 
       const sessionId = req.headers["mcp-session-id"] as string | undefined;

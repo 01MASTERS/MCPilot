@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import { ToolAggregator } from "./tool-aggregator.js";
 import { logToolInvocation } from "./audit.js";
 import { requireAuth } from "./auth.js";
+import { GATEWAY_META_TOOLS } from "./server.js";
+import { searchTools, getToolInfo, formatSearchResultsForLlm } from "./tool-search.js";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -167,7 +169,8 @@ export class ChatAgentRunner {
     }
 
     const tools = await this.toolAggregator.getAllNamespacedTools();
-    const formattedTools = tools.map((t) => ({
+    const allTools = [...tools, ...GATEWAY_META_TOOLS];
+    const formattedTools = allTools.map((t) => ({
       type: "function",
       function: {
         name: t.name,
@@ -181,7 +184,7 @@ export class ChatAgentRunner {
       content:
         `You are MCPilot, an autonomous AI gateway assistant managing connected MCP servers and multi-store WooCommerce environments.\n` +
         `Current user: ${caller.username} (Role: ${caller.role}).\n` +
-        `You have access to federated tools across multiple store environments (namespaced as store_<slug>__woocommerce__*).\n` +
+        `You have access to federated tools across multiple store environments (namespaced as store_<slug>__woocommerce__*) and meta-tools ('gateway__search_tools', 'gateway__get_tool_info', 'gateway__execute_tool') for large-fleet progressive tool discovery.\n` +
         `When asked to compare orders, products, or metrics across stores, execute the corresponding tools for each store (e.g. store_alpha__woocommerce__list_orders and store_beta__woocommerce__list_orders) and provide a structured side-by-side comparative summary.\n` +
         `Always invoke relevant federated tools to query live data, product details, or operational metrics before responding.\n` +
         `Provide concise, professional responses in markdown format.`,
@@ -326,7 +329,28 @@ export class ChatAgentRunner {
     const serverId = separatorIdx !== -1 ? toolName.slice(0, separatorIdx) : null;
 
     try {
-      const result = await this.toolAggregator.dispatchCall(toolName, args);
+      let result: any;
+      if (toolName === "gateway__search_tools") {
+        const allTools = await this.toolAggregator.getAllNamespacedTools().catch(() => []);
+        const results = searchTools(allTools, args?.query || "", {
+          serverId: args?.serverId,
+          limit: args?.limit || 10,
+          user: caller as any,
+        });
+        result = { content: [{ type: "text", text: formatSearchResultsForLlm(results) }] };
+      } else if (toolName === "gateway__get_tool_info") {
+        const allTools = await this.toolAggregator.getAllNamespacedTools().catch(() => []);
+        const info = getToolInfo(allTools, args?.toolName || "", caller as any);
+        result = info
+          ? { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] }
+          : { content: [{ type: "text", text: `Tool '${args?.toolName}' not found.` }], isError: true };
+      } else if (toolName === "gateway__execute_tool") {
+        const targetTool = String(args?.toolName || "");
+        const targetArgs = (args?.arguments as Record<string, any>) || {};
+        return this.executeAndLogTool(targetTool, targetArgs, caller);
+      } else {
+        result = await this.toolAggregator.dispatchCall(toolName, args);
+      }
       const durationMs = Date.now() - startTime;
       const isError = Boolean(result?.isError);
 

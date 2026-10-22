@@ -13,6 +13,7 @@
     "verify:bonus": "node scripts/verify-multi-store.mjs",
     "verify:observability": "node scripts/verify-observability.mjs",
     "verify:permissions": "node scripts/verify-tool-permissions.mjs",
+    "verify:many-tools": "node scripts/verify-many-tools.mjs",
     "verify:all": "node scripts/verify-all.mjs"
   },
   "keywords": [
