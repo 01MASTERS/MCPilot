@@ -27,6 +27,7 @@ export function App() {
   const [tools, setTools] = useState<McpTool[]>([]);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   // Check existing session
   useEffect(() => {
@@ -49,12 +50,12 @@ export function App() {
       });
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (forcePing = false) => {
     if (!currentUser) return;
     setIsRefreshing(true);
     try {
       const [serversData, keysData] = await Promise.all([
-        getServers().catch(() => ({ servers: [], tools: [] })),
+        getServers(forcePing).catch(() => ({ servers: [], tools: [] })),
         getKeys().catch(() => []),
       ]);
       setServers(serversData.servers || []);
@@ -64,6 +65,16 @@ export function App() {
       console.error("Error loading dashboard data:", err);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleGlobalRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshTrigger(Date.now());
+    try {
+      await loadData(true);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 400);
     }
   };
 
@@ -114,7 +125,7 @@ export function App() {
       <div className="flex-1 pl-64 flex flex-col min-h-screen">
         <Header
           activeTitle={tabTitles[activeTab] || "Gateway Dashboard"}
-          onRefresh={loadData}
+          onRefresh={handleGlobalRefresh}
           isRefreshing={isRefreshing}
         />
 
@@ -124,33 +135,56 @@ export function App() {
               servers={servers}
               tools={tools}
               currentUser={currentUser}
-              onRefresh={loadData}
+              onRefresh={handleGlobalRefresh}
+              isRefreshing={isRefreshing}
+              refreshTrigger={refreshTrigger}
             />
           )}
 
           {activeTab === "stores" && (
-            <StoresView currentUser={currentUser} />
+            <StoresView
+              currentUser={currentUser}
+              refreshTrigger={refreshTrigger}
+              onRefresh={handleGlobalRefresh}
+            />
           )}
 
-          {activeTab === "observability" && <ObservabilityView />}
+          {activeTab === "observability" && (
+            <ObservabilityView
+              refreshTrigger={refreshTrigger}
+            />
+          )}
 
           {activeTab === "permissions" && (
-            <PermissionsView currentUser={currentUser} />
+            <PermissionsView
+              currentUser={currentUser}
+              refreshTrigger={refreshTrigger}
+              onRefresh={handleGlobalRefresh}
+            />
           )}
 
           {activeTab === "keys" && (
             <ApiKeysView
               keys={keys}
               currentUser={currentUser}
-              onRefresh={loadData}
+              onRefresh={handleGlobalRefresh}
+              isRefreshing={isRefreshing}
+              refreshTrigger={refreshTrigger}
             />
           )}
 
-          {activeTab === "audit" && <AuditView />}
+          {activeTab === "audit" && (
+            <AuditView
+              refreshTrigger={refreshTrigger}
+            />
+          )}
 
           {/* Keep ChatAgent mounted across section changes to preserve chat state and smooth navigation */}
           <div className={activeTab === "chat" ? "block" : "hidden"}>
-            <ChatAgent currentUser={currentUser} />
+            <ChatAgent
+              currentUser={currentUser}
+              refreshTrigger={refreshTrigger}
+            />
           </div>
         </main>
       </div>

@@ -19,9 +19,11 @@ import { ConfirmModal } from "./ConfirmModal";
 
 interface StoresViewProps {
   currentUser: User;
+  refreshTrigger?: number;
+  onRefresh?: () => void;
 }
 
-export const StoresView: React.FC<StoresViewProps> = ({ currentUser }) => {
+export const StoresView: React.FC<StoresViewProps> = ({ currentUser, refreshTrigger, onRefresh }) => {
   const [stores, setStores] = useState<StoreEnvironment[]>([]);
   const [maxQuota, setMaxQuota] = useState<number>(3);
   const [loading, setLoading] = useState<boolean>(true);
@@ -57,6 +59,13 @@ export const StoresView: React.FC<StoresViewProps> = ({ currentUser }) => {
   useEffect(() => {
     fetchStores();
   }, []);
+
+  useEffect(() => {
+    if (refreshTrigger) {
+      setLoading(true);
+      fetchStores();
+    }
+  }, [refreshTrigger]);
 
   // Background polling every 3 seconds while any store is provisioning or deleting
   useEffect(() => {
@@ -149,18 +158,6 @@ export const StoresView: React.FC<StoresViewProps> = ({ currentUser }) => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setLoading(true);
-              fetchStores();
-            }}
-            className="geist-button-secondary text-xs flex items-center gap-1.5 py-1.5 px-3"
-            title="Refresh store status"
-          >
-            <ArrowsClockwise size={14} className={loading ? "animate-spin" : ""} />
-            <span>Refresh</span>
-          </button>
-
           <button
             onClick={() => {
               setProvisionError(null);
@@ -288,16 +285,24 @@ export const StoresView: React.FC<StoresViewProps> = ({ currentUser }) => {
                 {/* Metadata & Ingress URL */}
                 <div className="space-y-2 pt-2 border-t border-[#161616] text-xs">
                   <div>
-                    <span className="text-[#666666] block text-[10px] uppercase font-mono tracking-wider">Ingress Host</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#666666] block text-[10px] uppercase font-mono tracking-wider">Storefront Link</span>
+                      <span className="text-[10px] text-[#00DF8F]/80 font-mono">Instant Access</span>
+                    </div>
                     <a
                       href={s.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[#00DF8F] hover:underline font-mono text-xs flex items-center gap-1 mt-0.5"
+                      title="Direct browser access without modifying hosts file"
                     >
-                      <span>{s.ingressHost}:8080</span>
-                      <ArrowSquareOut size={12} />
+                      <span className="truncate">{s.slug}.127.0.0.1.nip.io:8080</span>
+                      <ArrowSquareOut size={12} className="shrink-0" />
                     </a>
+                    <div className="text-[10px] text-[#555555] font-mono mt-0.5 flex items-center justify-between">
+                      <span>Ingress:</span>
+                      <span className="text-[#777777]">{s.ingressHost}:8080</span>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-[#888888] pt-1">

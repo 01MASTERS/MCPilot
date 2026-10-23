@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import type { ApiKey, User, TeamMember } from "../types";
 import { createKey, revokeKey, getUsers, inviteUser } from "../services/api";
 import { ConfirmModal } from "./ConfirmModal";
+import { copyToClipboard } from "../services/clipboard";
 import {
   Key,
   Plus,
@@ -16,18 +17,23 @@ import {
   UserPlus,
   ShieldCheck,
   User as UserIcon,
+  ArrowsClockwise,
 } from "@phosphor-icons/react";
 
 interface ApiKeysViewProps {
   keys: ApiKey[];
   currentUser: User;
   onRefresh: () => void;
+  isRefreshing?: boolean;
+  refreshTrigger?: number;
 }
 
 export const ApiKeysView: React.FC<ApiKeysViewProps> = ({
   keys,
   currentUser,
   onRefresh,
+  isRefreshing,
+  refreshTrigger,
 }) => {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [keyName, setKeyName] = useState("");
@@ -72,6 +78,12 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({
   useEffect(() => {
     fetchMembers();
   }, [fetchMembers]);
+
+  useEffect(() => {
+    if (refreshTrigger) {
+      fetchMembers();
+    }
+  }, [refreshTrigger, fetchMembers]);
 
   const handleGenerateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,11 +167,13 @@ export const ApiKeysView: React.FC<ApiKeysViewProps> = ({
     }
   };
 
-  const handleCopyRevealedKey = () => {
+  const handleCopyRevealedKey = async () => {
     if (!revealedKey) return;
-    navigator.clipboard.writeText(revealedKey);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+    const ok = await copyToClipboard(revealedKey);
+    if (ok) {
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    }
   };
 
   return (

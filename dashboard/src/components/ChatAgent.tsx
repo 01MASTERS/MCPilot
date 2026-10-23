@@ -50,6 +50,7 @@ export interface ChatSession {
 
 interface ChatAgentProps {
   currentUser: User;
+  refreshTrigger?: number;
 }
 
 function getInitialIntroMessage(user: User): ChatMessage {
@@ -85,6 +86,91 @@ function formatSessionTime(isoString: string): string {
   } catch {
     return "";
   }
+}
+
+export type ProviderType = "ollama" | "openai" | "openrouter" | "custom";
+
+export interface ProviderConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+const DEFAULT_PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
+  ollama: {
+    baseUrl: "http://localhost:11434",
+    apiKey: "",
+    model: "nemotron-3-super:cloud",
+  },
+  openai: {
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    model: "gpt-4o",
+  },
+  openrouter: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "",
+    model: "openai/gpt-4o-mini",
+  },
+  custom: {
+    baseUrl: "http://localhost:1234/v1",
+    apiKey: "",
+    model: "local-model",
+  },
+};
+
+const STORAGE_KEY_PROVIDER = "mcpilot_provider";
+const STORAGE_KEY_PROVIDER_CONFIGS = "mcpilot_provider_configs";
+
+function loadInitialProvider(): ProviderType {
+  const p = localStorage.getItem(STORAGE_KEY_PROVIDER);
+  if (p === "ollama" || p === "openai" || p === "openrouter" || p === "custom") {
+    return p;
+  }
+  return "ollama";
+}
+
+function loadInitialConfigs(initialProvider: ProviderType): Record<ProviderType, ProviderConfig> {
+  const configs: Record<ProviderType, ProviderConfig> = {
+    ollama: { ...DEFAULT_PROVIDER_CONFIGS.ollama },
+    openai: { ...DEFAULT_PROVIDER_CONFIGS.openai },
+    openrouter: { ...DEFAULT_PROVIDER_CONFIGS.openrouter },
+    custom: { ...DEFAULT_PROVIDER_CONFIGS.custom },
+  };
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PROVIDER_CONFIGS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        for (const p of ["ollama", "openai", "openrouter", "custom"] as const) {
+          if (parsed[p]) {
+            configs[p] = {
+              baseUrl: typeof parsed[p].baseUrl === "string" ? parsed[p].baseUrl : configs[p].baseUrl,
+              apiKey: typeof parsed[p].apiKey === "string" ? parsed[p].apiKey : configs[p].apiKey,
+              model: typeof parsed[p].model === "string" ? parsed[p].model : configs[p].model,
+            };
+          }
+        }
+        return configs;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to parse provider configs from localStorage:", e);
+  }
+
+  // Backward compatibility migration from legacy global keys
+  const legacyBase = localStorage.getItem("mcpilot_base_url");
+  const legacyKey = localStorage.getItem("mcpilot_api_key");
+  const legacyModel = localStorage.getItem("mcpilot_model");
+
+  if (legacyBase || legacyKey || legacyModel) {
+    if (legacyBase) configs[initialProvider].baseUrl = legacyBase;
+    if (legacyKey) configs[initialProvider].apiKey = legacyKey;
+    if (legacyModel) configs[initialProvider].model = legacyModel;
+  }
+
+  return configs;
 }
 
 export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
@@ -183,29 +269,32 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Model & Provider Configuration (saved in localStorage)
-  const [provider, setProvider] = useState<"ollama" | "openai" | "openrouter" | "custom">(() => {
-    return (localStorage.getItem("mcpilot_provider") as any) || "ollama";
+  // Model & Provider Configuration with isolated per-provider persistence
+  const [provider, setProvider] = useState<ProviderType>(loadInitialProvider);
+  const [providerConfigs, setProviderConfigs] = useState<Record<ProviderType, ProviderConfig>>(() =>
+    loadInitialConfigs(provider)
+  );
+
+  // Per-provider cached models map so models don't disappear when switching provider tabs
+  const [availableModelsByProvider, setAvailableModelsByProvider] = useState<
+    Record<ProviderType, string[]>
+  >({
+    ollama: [],
+    openai: [],
+    openrouter: [],
+    custom: [],
   });
 
-  const [baseUrl, setBaseUrl] = useState<string>(() => {
-    return (
-      localStorage.getItem("mcpilot_base_url") ||
-      (provider === "ollama" ? "http://localhost:11434" : "https://api.openai.com/v1")
-    );
-  });
-
-  const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem("mcpilot_api_key") || "";
-  });
-
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
-    return localStorage.getItem("mcpilot_model") || "nemotron-3-super:cloud";
-  });
-
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [modelsFetchError, setModelsFetchError] = useState<string | null>(null);
+  const [modelsFetchSuccess, setModelsFetchSuccess] = useState<string | null>(null);
+
+  // Derived current provider settings
+  const currentConfig = providerConfigs[provider] || DEFAULT_PROVIDER_CONFIGS[provider];
+  const baseUrl = currentConfig.baseUrl;
+  const apiKey = currentConfig.apiKey;
+  const selectedModel = currentConfig.model;
+  const availableModels = availableModelsByProvider[provider] || [];
 
   // UI state
   const [showSettings, setShowSettings] = useState(false);
@@ -215,7 +304,6 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const lastFetchedKeyRef = useRef<string>("");
 
   // Keep input focused on mount and whenever loading finishes
   useEffect(() => {
@@ -226,15 +314,41 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // Model fetching function
-  const fetchModelsFromEndpoint = async (
+  // Update a specific provider's configuration and persist to localStorage
+  const updateProviderConfig = (
+    targetProvider: ProviderType,
+    patch: Partial<ProviderConfig>
+  ) => {
+    setProviderConfigs((prev) => {
+      const updated = {
+        ...prev,
+        [targetProvider]: {
+          ...prev[targetProvider],
+          ...patch,
+        },
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROVIDER_CONFIGS, JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to persist provider configs:", e);
+      }
+      return updated;
+    });
+  };
+
+  // Robust model fetching for any provider
+  const fetchModelsForProvider = async (
     targetProvider = provider,
     targetBaseUrl = baseUrl,
     targetApiKey = apiKey,
     isSilent = false
   ) => {
-    if (!isSilent) setIsFetchingModels(true);
-    setModelsFetchError(null);
+    if (!isSilent) {
+      setIsFetchingModels(true);
+      setModelsFetchError(null);
+      setModelsFetchSuccess(null);
+    }
+
     try {
       const res = await fetchLlmModels({
         provider: targetProvider,
@@ -243,97 +357,106 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
       });
 
       if (Array.isArray(res.models) && res.models.length > 0) {
-        setAvailableModels(res.models);
-        if (!res.models.includes(selectedModel)) {
-          setSelectedModel(res.models[0]);
-          localStorage.setItem("mcpilot_model", res.models[0]);
+        setAvailableModelsByProvider((prev) => ({
+          ...prev,
+          [targetProvider]: res.models,
+        }));
+
+        // If current model is empty or not in the available list, select first model
+        setProviderConfigs((prev) => {
+          const currentTargetModel = prev[targetProvider]?.model || "";
+          const updatedModel = res.models.includes(currentTargetModel)
+            ? currentTargetModel
+            : res.models[0];
+
+          const updated = {
+            ...prev,
+            [targetProvider]: {
+              ...prev[targetProvider],
+              model: updatedModel,
+            },
+          };
+          try {
+            localStorage.setItem(STORAGE_KEY_PROVIDER_CONFIGS, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+
+        if (!isSilent) {
+          setModelsFetchSuccess(`Discovered ${res.models.length} models from ${res.resolvedBaseUrl || targetBaseUrl}`);
         }
       } else {
-        setAvailableModels([]);
+        setAvailableModelsByProvider((prev) => ({
+          ...prev,
+          [targetProvider]: [],
+        }));
         if (!isSilent) {
           setModelsFetchError("No models found at this endpoint.");
         }
       }
     } catch (err: any) {
       if (!isSilent) {
-        console.warn("Failed to fetch models:", err.message);
-        setModelsFetchError(err.message || "Failed to connect to model provider");
+        setModelsFetchError(err.message || `Failed to connect to ${targetProvider}`);
       }
     } finally {
       if (!isSilent) setIsFetchingModels(false);
     }
   };
 
-  // 1. Silent periodic fetch for local Ollama models (every 30s)
+  // Initial fetch for the active provider on component mount
+  useEffect(() => {
+    fetchModelsForProvider(provider, baseUrl, apiKey, true);
+  }, []);
+
+  // Periodic silent refresh for Ollama (every 30s)
   useEffect(() => {
     if (provider !== "ollama") return;
 
-    fetchModelsFromEndpoint("ollama", baseUrl, apiKey, false);
-
     const interval = setInterval(() => {
-      fetchModelsFromEndpoint("ollama", baseUrl, apiKey, true);
+      fetchModelsForProvider("ollama", baseUrl, apiKey, true);
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [provider, baseUrl]);
+  }, [provider, baseUrl, apiKey]);
 
-  // 2. Remote providers: Fetch models ONLY once a new API key is entered
-  useEffect(() => {
-    if (provider === "ollama") return;
-    const cleanKey = apiKey.trim();
-    if (!cleanKey) return;
-    if (cleanKey === lastFetchedKeyRef.current) return;
-
-    const timer = setTimeout(() => {
-      lastFetchedKeyRef.current = cleanKey;
-      fetchModelsFromEndpoint(provider, baseUrl, cleanKey, false);
-    }, 800);
-
-    return () => clearTimeout(timer);
-  }, [apiKey, provider, baseUrl]);
-
-  const handleProviderChange = (newProvider: "ollama" | "openai" | "openrouter" | "custom") => {
+  // Provider switching preserves each provider's configuration
+  const handleProviderChange = (newProvider: ProviderType) => {
     setProvider(newProvider);
-    localStorage.setItem("mcpilot_provider", newProvider);
+    localStorage.setItem(STORAGE_KEY_PROVIDER, newProvider);
+    setModelsFetchError(null);
+    setModelsFetchSuccess(null);
 
-    let defaultBase = baseUrl;
-    if (newProvider === "ollama") defaultBase = "http://localhost:11434";
-    else if (newProvider === "openai") defaultBase = "https://api.openai.com/v1";
-    else if (newProvider === "openrouter") defaultBase = "https://openrouter.ai/api/v1";
-
-    setBaseUrl(defaultBase);
-    localStorage.setItem("mcpilot_base_url", defaultBase);
-
-    if (newProvider === "ollama") {
-      fetchModelsFromEndpoint(newProvider, defaultBase, apiKey, false);
-    } else if (apiKey.trim()) {
-      lastFetchedKeyRef.current = apiKey.trim();
-      fetchModelsFromEndpoint(newProvider, defaultBase, apiKey.trim(), false);
-    } else {
-      setAvailableModels([]);
+    const targetConfig = providerConfigs[newProvider] || DEFAULT_PROVIDER_CONFIGS[newProvider];
+    // If we don't have models yet for this provider, fetch them
+    if (!availableModelsByProvider[newProvider] || availableModelsByProvider[newProvider].length === 0) {
+      if (newProvider === "ollama" || targetConfig.apiKey.trim()) {
+        fetchModelsForProvider(newProvider, targetConfig.baseUrl, targetConfig.apiKey, false);
+      }
     }
   };
 
   const handleBaseUrlChange = (val: string) => {
-    setBaseUrl(val);
-    localStorage.setItem("mcpilot_base_url", val);
+    updateProviderConfig(provider, { baseUrl: val });
+  };
+
+  const handleBaseUrlBlur = () => {
+    if (baseUrl.trim()) {
+      fetchModelsForProvider(provider, baseUrl, apiKey, false);
+    }
   };
 
   const handleApiKeyChange = (val: string) => {
-    setApiKey(val);
-    localStorage.setItem("mcpilot_api_key", val);
+    updateProviderConfig(provider, { apiKey: val });
   };
 
   const handleApiKeyBlur = () => {
-    if (provider !== "ollama" && apiKey.trim() && apiKey.trim() !== lastFetchedKeyRef.current) {
-      lastFetchedKeyRef.current = apiKey.trim();
-      fetchModelsFromEndpoint(provider, baseUrl, apiKey.trim(), false);
+    if (provider !== "ollama" && apiKey.trim()) {
+      fetchModelsForProvider(provider, baseUrl, apiKey, false);
     }
   };
 
   const handleModelChange = (val: string) => {
-    setSelectedModel(val);
-    localStorage.setItem("mcpilot_model", val);
+    updateProviderConfig(provider, { model: val });
   };
 
   const toggleToolCard = (key: string) => {
@@ -728,6 +851,15 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
                   className="bg-black border border-[#222222] rounded px-2.5 py-1 text-xs text-[#EDEDED] font-mono focus:outline-none focus:border-[#00DF8F] w-44"
                 />
               )}
+              <button
+                type="button"
+                onClick={() => fetchModelsForProvider(provider, baseUrl, apiKey, false)}
+                disabled={isFetchingModels}
+                className="p-1 rounded border border-[#222222] bg-black text-[#888888] hover:text-[#00DF8F] hover:border-[#00DF8F]/40 disabled:opacity-50 transition-colors"
+                title="Refresh available models from endpoint"
+              >
+                <ArrowsClockwise size={12} className={isFetchingModels ? "animate-spin text-[#00DF8F]" : ""} />
+              </button>
             </div>
 
             {/* Settings Toggle */}
@@ -770,6 +902,24 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
         {/* Expandable Model & API Key Configuration Drawer */}
         {showSettings && (
           <div className="p-3.5 bg-[#0A0A0A] border-b border-[#222222] space-y-3 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between pb-1 border-b border-[#1A1A1A]">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-[#EDEDED] capitalize">{provider} Settings</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#1A1A1A] text-[#888888] border border-[#2A2A2A]">
+                  Isolated per provider
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => fetchModelsForProvider(provider, baseUrl, apiKey, false)}
+                disabled={isFetchingModels}
+                className="px-2.5 py-1 bg-[#111111] hover:bg-[#1A1A1A] border border-[#262626] hover:border-[#00DF8F]/50 text-white rounded text-[11px] font-mono flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                <ArrowsClockwise size={12} className={isFetchingModels ? "animate-spin text-[#00DF8F]" : "text-[#00DF8F]"} />
+                <span>{isFetchingModels ? "Connecting..." : "Fetch Models"}</span>
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="block text-[10px] uppercase font-mono text-[#888888] mb-1">
@@ -779,6 +929,10 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
                   type="text"
                   value={baseUrl}
                   onChange={(e) => handleBaseUrlChange(e.target.value)}
+                  onBlur={handleBaseUrlBlur}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleBaseUrlBlur();
+                  }}
                   placeholder={
                     provider === "ollama" ? "http://localhost:11434" : "https://api.openai.com/v1"
                   }
@@ -786,7 +940,7 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
                 />
                 <p className="text-[10px] text-[#666666] mt-0.5">
                   {provider === "ollama"
-                    ? "Localhost Ollama is automatically forwarded from within containers."
+                    ? "Localhost Ollama is automatically forwarded to host machine if in container."
                     : "Standard OpenAI-compatible API base URL."}
                 </p>
               </div>
@@ -801,6 +955,9 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
                     value={apiKey}
                     onChange={(e) => handleApiKeyChange(e.target.value)}
                     onBlur={handleApiKeyBlur}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleApiKeyBlur();
+                    }}
                     placeholder="sk-..."
                     className="w-full pl-2.5 pr-8 py-1.5 bg-black border border-[#222222] rounded text-xs text-[#EDEDED] font-mono focus:outline-none focus:border-[#00DF8F]"
                   />
@@ -814,11 +971,18 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ currentUser }) => {
                 </div>
                 <p className="text-[10px] text-[#666666] mt-0.5">
                   {provider !== "ollama"
-                    ? "Models will auto-fetch once a new key is entered."
-                    : "Saved securely in browser local storage."}
+                    ? "Press Enter or blur to auto-fetch models."
+                    : "Saved securely and separately for each provider."}
                 </p>
               </div>
             </div>
+
+            {modelsFetchSuccess && (
+              <div className="p-2 bg-[#00DF8F]/10 border border-[#00DF8F]/40 rounded text-xs text-[#00DF8F] flex items-center gap-2">
+                <Sparkle size={14} weight="fill" className="flex-shrink-0" />
+                <span>{modelsFetchSuccess}</span>
+              </div>
+            )}
 
             {modelsFetchError && (
               <div className="p-2 bg-red-950/40 border border-[#EE0000]/40 rounded text-xs text-[#EE0000] flex items-center gap-2">

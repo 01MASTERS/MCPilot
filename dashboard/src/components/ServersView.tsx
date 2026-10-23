@@ -7,6 +7,7 @@ import {
   toggleServer,
 } from "../services/api";
 import { ConfirmModal } from "./ConfirmModal";
+import { copyToClipboard } from "../services/clipboard";
 import {
   Plus,
   Trash,
@@ -24,6 +25,7 @@ import {
   Lightning,
   X,
   Funnel,
+  ArrowsClockwise,
 } from "@phosphor-icons/react";
 
 interface ServersViewProps {
@@ -31,6 +33,8 @@ interface ServersViewProps {
   tools: McpTool[];
   currentUser: User;
   onRefresh: () => void;
+  isRefreshing?: boolean;
+  refreshTrigger?: number;
 }
 
 export const ServersView: React.FC<ServersViewProps> = ({
@@ -38,6 +42,8 @@ export const ServersView: React.FC<ServersViewProps> = ({
   tools,
   currentUser,
   onRefresh,
+  isRefreshing,
+  refreshTrigger,
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newServerName, setNewServerName] = useState("");
@@ -120,10 +126,12 @@ export const ServersView: React.FC<ServersViewProps> = ({
     setExpandedTools((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
-  const handleCopyToolName = (name: string) => {
-    navigator.clipboard.writeText(name);
-    setCopiedTool(name);
-    setTimeout(() => setCopiedTool(null), 1500);
+  const handleCopyToolName = async (name: string) => {
+    const ok = await copyToClipboard(name);
+    if (ok) {
+      setCopiedTool(name);
+      setTimeout(() => setCopiedTool(null), 1500);
+    }
   };
 
   const handleOpenEdit = (server: McpServer) => {

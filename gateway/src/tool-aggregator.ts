@@ -2,12 +2,24 @@ import { UpstreamClientManager, UpstreamTool } from "./upstream-manager.js";
 import { getEnabledServers, McpServerRecord } from "./db.js";
 
 export class ToolAggregator {
+  private toolCache: { tools: any[]; timestamp: number } | null = null;
+  private readonly CACHE_TTL_MS = 15000; // 15 seconds cache
+
   constructor(private upstreamManager: UpstreamClientManager) {}
+
+  public invalidateCache(): void {
+    this.toolCache = null;
+  }
 
   /**
    * Aggregate tools across all enabled upstreams with fault isolation (GATE-04, GATE-06)
    */
-  async getAllNamespacedTools(): Promise<any[]> {
+  async getAllNamespacedTools(forceRefresh = false): Promise<any[]> {
+    const now = Date.now();
+    if (!forceRefresh && this.toolCache && now - this.toolCache.timestamp < this.CACHE_TTL_MS) {
+      return this.toolCache.tools;
+    }
+
     const servers = await getEnabledServers();
 
     // Query all upstreams concurrently using allSettled to ensure 1 dead upstream doesn't block others
@@ -30,6 +42,7 @@ export class ToolAggregator {
       }
     }
 
+    this.toolCache = { tools: aggregatedTools, timestamp: now };
     return aggregatedTools;
   }
 

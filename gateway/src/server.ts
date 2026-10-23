@@ -335,6 +335,15 @@ export function startGatewayApp(
   const publicDir = path.resolve(__dirname, "../public");
   app.use(express.static(publicDir));
 
+  // Ensure all API endpoints are NEVER cached by browsers or proxy layers
+  app.use("/api", (_req: Request, res: Response, next) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+    next();
+  });
+
   // REST APIs for Dashboard & Authentication
   app.use("/api/auth", createAuthRouter());
   app.use("/api/users", createUsersRouter());

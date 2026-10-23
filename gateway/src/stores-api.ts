@@ -35,6 +35,13 @@ export function createStoresRouter(toolAggregator: ToolAggregator): Router {
     try {
       const stores = await listStoreRecords();
 
+      // Proactively reconcile any stores currently marked 'provisioning'
+      for (const s of stores) {
+        if (s.status === "provisioning") {
+          await storeProvisioner.reconcileStoreStatus(s).catch(() => {});
+        }
+      }
+
       // Retrieve aggregated tools to count tools per store
       let allTools: any[] = [];
       try {
@@ -53,7 +60,8 @@ export function createStoresRouter(toolAggregator: ToolAggregator): Router {
           slug: s.slug,
           namespace: s.namespace,
           ingressHost: s.ingress_host,
-          url: `http://${s.ingress_host}:8080/`,
+          url: `http://${s.slug}.127.0.0.1.nip.io:8080/`,
+          localTestUrl: `http://${s.ingress_host}:8080/`,
           status: s.status,
           createdBy: s.created_by,
           createdAt: s.created_at,
@@ -179,6 +187,7 @@ export function createStoresRouter(toolAggregator: ToolAggregator): Router {
 
       // Trigger cascading teardown
       await storeProvisioner.teardownStore(storeId);
+      toolAggregator.invalidateCache();
 
       res.status(200).json({
         message: `Store '${store.name}' (${store.namespace}) teardown initiated. Namespace and MCP registration removed.`,

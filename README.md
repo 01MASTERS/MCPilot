@@ -276,30 +276,55 @@ MCPilot implements the optional "Ways to Stand Out" from Page 6 of the assignmen
 ### Local Kubernetes (k3d)
 
 1. **Create the k3d cluster with Ingress port mapping**:
-   ```bash
-   k3d cluster create mcpilot \
-     -p "8080:80@loadbalancer" \
-     -p "8443:443@loadbalancer"
-   ```
+   - **PowerShell (Windows)**:
+     ```powershell
+     k3d cluster create mcpilot -p "8080:80@loadbalancer" -p "8443:443@loadbalancer"
+     ```
+     *(Or multi-line using the PowerShell backtick `` ` `` continuation character)*:
+     ```powershell
+     k3d cluster create mcpilot `
+       -p "8080:80@loadbalancer" `
+       -p "8443:443@loadbalancer"
+     ```
+   - **Bash / Linux / macOS**:
+     ```bash
+     k3d cluster create mcpilot \
+       -p "8080:80@loadbalancer" \
+       -p "8443:443@loadbalancer"
+     ```
 
-2. **Configure Local Domains in your hosts file**:
+2. **Build and Import Local Container Images into k3d**:
+   Build the gateway and custom MCP microservice images and load them directly into the cluster:
+   ```bash
+   npm run docker:build
+   npm run k3d:import
+   ```
+   *(Or manually: `docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time && k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest -c mcpilot`)*
+
+3. **Configure Local Domains in your hosts file**:
    Add the following line to `C:\Windows\System32\drivers\etc\hosts` (Windows) or `/etc/hosts` (macOS/Linux):
    ```text
    127.0.0.1 gateway.local.test store.local.test
    ```
+   *(Optional fallback: If you cannot edit hosts, port-forward directly: `kubectl port-forward svc/mcpilot-gateway 8000:8000`)*
 
-3. **Deploy the Unified Helm Chart**:
+4. **Deploy the Unified Helm Chart**:
    ```bash
    helm install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-local.yaml
    ```
+   > **Windows Tip**: If `helm` or `kubectl` report `cluster unreachable` connecting to `host.docker.internal`, point your kubeconfig directly to loopback:
+   > ```powershell
+   > kubectl config set-cluster k3d-mcpilot --server=https://127.0.0.1:<port>
+   > ```
+   > Find the port with `docker ps --filter "name=k3d-mcpilot-serverlb"` (e.g., `58916`).
 
-4. **Verify Pod Readiness**:
+5. **Verify Pod Readiness**:
    ```bash
    kubectl get pods -l app.kubernetes.io/name=mcpilot
    ```
    *Expected: All 6 pods (`mcpilot-gateway`, `mcpilot-mariadb-0`, `mcpilot-woocommerce-mcp`, `mcpilot-analytics-mcp`, `mcpilot-time-mcp`, `mcpilot-wordpress`) running and ready.*
 
-5. **Access the Applications**:
+6. **Access the Applications**:
    - **Management Dashboard**: [http://gateway.local.test:8080/](http://gateway.local.test:8080/) (or `http://localhost:8000` via `kubectl port-forward svc/mcpilot-gateway 8000:8000`)
    - **WooCommerce Storefront**: [http://store.local.test:8080/](http://store.local.test:8080/)
    - **Pre-seeded Accounts**:
@@ -421,6 +446,9 @@ npm run verify:revocation       # VERIF-03: Instant API key revocation lifecycle
 npm run verify:fault-isolation  # VERIF-04: Upstream pod kill & fault isolation
 npm run verify:security         # INFRA-06: Container security & non-root audit
 npm run verify:team             # AUTH-01/04: Admin upstream editing & team member onboarding
+npm run verify:role-matrix      # Comprehensive RBAC & per-role tool calling matrix
+npm run verify:bonus            # BONUS-01..07: Multi-store provisioning & isolation
+npm run verify:observability    # OBS-01..04: Telemetry metrics & failure diagnostics
 ```
 
 ---

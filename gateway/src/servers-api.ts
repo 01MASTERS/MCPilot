@@ -13,9 +13,18 @@ export function createServersRouter(
   const router = Router();
 
   // GET /api/servers - List all servers with health status, tool counts, and sanitized tokens (UI-01)
-  router.get("/", requireAuth, async (_req: Request, res: Response): Promise<void> => {
+  router.get("/", requireAuth, async (req: Request, res: Response): Promise<void> => {
     try {
+      const shouldRefresh = req.query.refresh === "true";
       const servers = await getAllServers();
+
+      // If manual refresh requested, live ping all enabled upstreams
+      if (shouldRefresh) {
+        await Promise.allSettled(
+          servers.filter((s) => s.enabled).map((s) => upstreamManager.pingServer(s))
+        );
+      }
+
       const allTools = await toolAggregator.getAllNamespacedTools().catch(() => []);
 
       // Group tool count per server
@@ -102,6 +111,7 @@ export function createServersRouter(
       upstreamManager.pingServer(serverRecord).catch(() => {});
 
       console.log(`[mcpilot-gateway] Admin ${req.user?.username} registered upstream server '${id}' (${baseUrl})`);
+      toolAggregator.invalidateCache();
 
       res.status(201).json({
         id,
@@ -183,6 +193,7 @@ export function createServersRouter(
 
       await db.query("DELETE FROM mcp_servers WHERE id = ?", [id]);
       await upstreamManager.closeClient(id);
+      toolAggregator.invalidateCache();
 
       console.log(`[mcpilot-gateway] Admin ${req.user?.username} removed upstream server '${id}'`);
 
@@ -211,6 +222,7 @@ export function createServersRouter(
 
       await db.query("UPDATE mcp_servers SET enabled = ?, status = ? WHERE id = ?", [newEnabled, newStatus, id]);
       await upstreamManager.closeClient(id);
+      toolAggregator.invalidateCache();
 
       if (newEnabled) {
         // Ping in background to check real connectivity

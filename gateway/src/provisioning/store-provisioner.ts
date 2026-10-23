@@ -10,6 +10,7 @@ import {
   updateStoreStatus,
   deleteStoreRecord,
   getDbPool,
+  StoreRecord,
 } from "../db.js";
 
 const execAsync = promisify(exec);
@@ -149,6 +150,10 @@ export class StoreProvisioner {
       await this.applyManifest(manifests.wordpressPvc);
       await this.applyManifest(manifests.wordpressService);
       await this.applyManifest(manifests.wordpressDeployment);
+      if (manifests.initJob) {
+        console.log(`[store-provisioner] Applying bootstrap job for ${namespace}...`);
+        await this.applyManifest(manifests.initJob);
+      }
       await this.applyManifest(manifests.ingress);
       await this.applyManifest(manifests.mcpService);
       await this.applyManifest(manifests.mcpDeployment);
@@ -211,7 +216,7 @@ export class StoreProvisioner {
   /**
    * Check if the WooCommerce MCP Server pod in the target namespace is ready
    */
-  private async checkMcpServerReady(namespace: string): Promise<boolean> {
+  public async checkMcpServerReady(namespace: string): Promise<boolean> {
     try {
       if (this.isK8sPod) {
         // Direct ping to cluster service
@@ -231,6 +236,30 @@ export class StoreProvisioner {
       }
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Proactively reconcile store status when refreshing stores
+   */
+  public async reconcileStoreStatus(store: StoreRecord): Promise<void> {
+    if (store.status !== "provisioning") return;
+    const isReady = await this.checkMcpServerReady(store.namespace);
+    if (isReady) {
+      console.log(`[store-provisioner] Store '${store.slug}' workloads ready. Registering in Gateway...`);
+      const db = getDbPool();
+      const serverId = `store_${store.slug}`;
+      const baseUrl = `http://mcpilot-woocommerce-mcp.${store.namespace}.svc.cluster.local:3000/mcp`;
+
+      await db.query(
+        `INSERT INTO mcp_servers (id, name, base_url, status, enabled)
+         VALUES (?, ?, ?, 'Connected', TRUE)
+         ON DUPLICATE KEY UPDATE base_url = VALUES(base_url), status = 'Connected', enabled = TRUE`,
+        [serverId, `Store: ${store.name}`, baseUrl]
+      );
+
+      await updateStoreStatus(store.id, "ready", null);
+      store.status = "ready";
     }
   }
 

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { marked } from "marked";
 import { Copy, Check } from "@phosphor-icons/react";
+import { copyToClipboard } from "../services/clipboard";
 
 interface MarkdownMessageProps {
   content: string;
@@ -35,10 +36,12 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
     }
   }, [content, isUser]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(content);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   if (isUser) {

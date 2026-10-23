@@ -5,6 +5,8 @@ secrets:
   mariadbRootPassword: "root_super_secure_password"
   mariadbPassword: "wc_db_password"
   wpAdminPassword: "admin_super_secure_password"
+  wcConsumerKey: "ck_demo_key_mcpilot"
+  wcConsumerSecret: "cs_demo_secret_mcpilot"
 
 store:
   enabled: true

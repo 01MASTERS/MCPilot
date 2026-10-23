@@ -31,9 +31,11 @@ import {
 
 interface PermissionsViewProps {
   currentUser: User;
+  refreshTrigger?: number;
+  onRefresh?: () => void;
 }
 
-export const PermissionsView: React.FC<PermissionsViewProps> = ({ currentUser }) => {
+export const PermissionsView: React.FC<PermissionsViewProps> = ({ currentUser, refreshTrigger, onRefresh }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
@@ -71,6 +73,12 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({ currentUser })
   useEffect(() => {
     loadPermissionsData();
   }, []);
+
+  useEffect(() => {
+    if (refreshTrigger) {
+      loadPermissionsData(true);
+    }
+  }, [refreshTrigger]);
 
   const handleToggleMemberPermission = async (
     item: EffectiveToolPermission,
@@ -215,16 +223,6 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({ currentUser })
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            onClick={() => loadPermissionsData(true)}
-            disabled={loading}
-            className="px-3 py-1.5 bg-[#0A0A0A] hover:bg-[#151515] text-[#888888] hover:text-[#EDEDED] border border-[#222222] rounded-md text-xs font-medium transition-colors flex items-center gap-1.5"
-            title="Reload policies from gateway"
-          >
-            <ArrowsClockwise size={14} className={loading ? "animate-spin" : ""} />
-            <span>Refresh</span>
-          </button>
-
           {currentUser.role === "admin" && (
             <button
               onClick={() => setIsResetModalOpen(true)}

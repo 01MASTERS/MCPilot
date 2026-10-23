@@ -152,7 +152,7 @@ export class UpstreamClientManager {
           arguments: args,
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Upstream '${server.id}' call timed out after 5000ms`)), 5000)
+          setTimeout(() => reject(new Error(`Upstream '${server.id}' call timed out after 10000ms`)), 10000)
         ),
       ]);
 

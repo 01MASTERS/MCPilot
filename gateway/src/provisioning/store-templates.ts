@@ -390,7 +390,8 @@ export function generateStoreManifests(params: StoreTemplateParams) {
     },
   };
 
-  // 8. Ingress Rule (INFRA-04, BONUS-02)
+  // 8. Ingress Rule with dual-host support (INFRA-04, BONUS-02)
+  // Supports both <slug>.local.test and <slug>.127.0.0.1.nip.io for instant zero-config browser access
   const ingressManifest = {
     apiVersion: "networking.k8s.io/v1",
     kind: "Ingress",
@@ -422,7 +423,119 @@ export function generateStoreManifests(params: StoreTemplateParams) {
             ],
           },
         },
+        {
+          host: `${slug}.127.0.0.1.nip.io`,
+          http: {
+            paths: [
+              {
+                path: "/",
+                pathType: "Prefix",
+                backend: {
+                  service: {
+                    name: "mcpilot-wordpress",
+                    port: { number: 80 },
+                  },
+                },
+              },
+            ],
+          },
+        },
       ],
+    },
+  };
+
+  // 9. Store Initialization Job (Bootstraps WordPress, WooCommerce plugin, credentials & demo products)
+  const initJob = {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    metadata: {
+      name: "mcpilot-init-store",
+      namespace: namespace,
+      labels: {
+        "app.kubernetes.io/name": "mcpilot-store",
+        "app.kubernetes.io/component": "store-init",
+      },
+    },
+    spec: {
+      backoffLimit: 2,
+      template: {
+        metadata: {
+          labels: {
+            "app.kubernetes.io/name": "mcpilot-store",
+            "app.kubernetes.io/component": "store-init",
+          },
+        },
+        spec: {
+          restartPolicy: "OnFailure",
+          securityContext: {
+            runAsUser: 0,
+          },
+          volumes: [
+            {
+              name: "wordpress-data",
+              persistentVolumeClaim: {
+                claimName: "mcpilot-wordpress-data",
+              },
+            },
+          ],
+          containers: [
+            {
+              name: "store-init",
+              image: "mcpilot-store-init:latest",
+              imagePullPolicy: "IfNotPresent",
+              volumeMounts: [
+                {
+                  name: "wordpress-data",
+                  mountPath: "/var/www/html",
+                },
+              ],
+              env: [
+                { name: "WORDPRESS_DB_HOST", value: "mcpilot-mariadb:3306" },
+                { name: "WORDPRESS_DB_USER", value: "wordpress" },
+                {
+                  name: "WORDPRESS_DB_PASSWORD",
+                  valueFrom: {
+                    secretKeyRef: {
+                      name: "mcpilot-store-secrets",
+                      key: "mariadb-password",
+                    },
+                  },
+                },
+                { name: "WORDPRESS_DB_NAME", value: "wordpress" },
+                {
+                  name: "WP_ADMIN_PASSWORD",
+                  valueFrom: {
+                    secretKeyRef: {
+                      name: "mcpilot-store-secrets",
+                      key: "wp-admin-password",
+                    },
+                  },
+                },
+                { name: "WP_URL", value: `http://${ingressHost}:8080` },
+                { name: "STORE_NAME", value: name },
+                {
+                  name: "WC_CONSUMER_KEY",
+                  valueFrom: {
+                    secretKeyRef: {
+                      name: "mcpilot-store-secrets",
+                      key: "wc-consumer-key",
+                    },
+                  },
+                },
+                {
+                  name: "WC_CONSUMER_SECRET",
+                  valueFrom: {
+                    secretKeyRef: {
+                      name: "mcpilot-store-secrets",
+                      key: "wc-consumer-secret",
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
     },
   };
 
@@ -536,6 +649,7 @@ export function generateStoreManifests(params: StoreTemplateParams) {
     wordpressPvc,
     wordpressService,
     wordpressDeployment,
+    initJob,
     ingress: ingressManifest,
     mcpService,
     mcpDeployment,

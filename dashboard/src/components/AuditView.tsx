@@ -11,7 +11,11 @@ import {
   X,
 } from "@phosphor-icons/react";
 
-export const AuditView: React.FC = () => {
+interface AuditViewProps {
+  refreshTrigger?: number;
+}
+
+export const AuditView: React.FC<AuditViewProps> = ({ refreshTrigger }) => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -45,6 +49,12 @@ export const AuditView: React.FC = () => {
 
     return () => clearTimeout(debounceTimer);
   }, [search, statusFilter]);
+
+  useEffect(() => {
+    if (refreshTrigger) {
+      fetchLogs();
+    }
+  }, [refreshTrigger]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,19 +121,6 @@ export const AuditView: React.FC = () => {
               </button>
             )}
           </form>
-
-          <button
-            onClick={() => fetchLogs()}
-            disabled={loading}
-            className="geist-button-secondary py-1.5 px-2.5 text-xs"
-            title="Refresh logs"
-          >
-            <ArrowsClockwise
-              size={14}
-              weight="bold"
-              className={loading ? "animate-spin text-[#00DF8F]" : ""}
-            />
-          </button>
         </div>
       </div>
 

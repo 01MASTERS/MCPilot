@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { AuditLog } from "../types";
+import { copyToClipboard } from "../services/clipboard";
 import {
   X,
   Clock,
@@ -33,10 +34,12 @@ export const TraceDrawer: React.FC<TraceDrawerProps> = ({ log, onClose }) => {
 
   const isSuccess = log.status === "success";
 
-  const handleCopyPayload = () => {
-    navigator.clipboard.writeText(JSON.stringify(log.arguments || {}, null, 2));
-    setCopiedPayload(true);
-    setTimeout(() => setCopiedPayload(false), 1500);
+  const handleCopyPayload = async () => {
+    const ok = await copyToClipboard(JSON.stringify(log.arguments || {}, null, 2));
+    if (ok) {
+      setCopiedPayload(true);
+      setTimeout(() => setCopiedPayload(false), 1500);
+    }
   };
 
   return (

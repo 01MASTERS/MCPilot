@@ -12,14 +12,23 @@ export function registerAnalyticsTools(server: McpServer, config: AnalyticsConfi
     return "Basic " + Buffer.from(`${config.consumerKey}:${config.consumerSecret}`).toString("base64");
   };
 
+  const cache = new Map<string, { data: any; expiresAt: number }>();
+
   const fetchWooCommerce = async (endpoint: string, params: Record<string, string> = {}): Promise<any> => {
     const url = new URL(endpoint, config.wordpressUrl);
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+    const cacheKey = url.toString();
+
+    const cached = cache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data;
+    }
 
     const response = await fetch(url.toString(), {
       headers: {
         Authorization: getAuthHeader(),
         Accept: "application/json",
+        "X-Forwarded-Proto": "https",
       },
       signal: AbortSignal.timeout(8000),
     });
@@ -28,7 +37,9 @@ export function registerAnalyticsTools(server: McpServer, config: AnalyticsConfi
       throw new Error(`WooCommerce API error ${response.status}: ${response.statusText}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    cache.set(cacheKey, { data, expiresAt: Date.now() + 10000 }); // 10s cache
+    return data;
   };
 
   // 1. Tool: get_store_metrics

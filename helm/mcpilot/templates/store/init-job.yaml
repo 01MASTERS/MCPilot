@@ -6,9 +6,6 @@ metadata:
   labels:
     {{- include "mcpilot.labels" . | nindent 4 }}
     app.kubernetes.io/component: store-init
-  annotations:
-    "helm.sh/hook": post-install
-    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 5
   template:
@@ -20,8 +17,10 @@ spec:
     spec:
       restartPolicy: OnFailure
       securityContext:
-        fsGroup: 33
+        runAsUser: 0
       volumes:
+        - name: html-dir
+          emptyDir: {}
         - name: wordpress-data
           {{- if .Values.store.wordpress.persistence.enabled }}
           persistentVolumeClaim:
@@ -29,11 +28,28 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+      initContainers:
+        - name: copy-core
+          image: "{{ .Values.store.wordpress.image.repository }}:{{ .Values.store.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.store.wordpress.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -f /var/www/html/wp-load.php ]; then
+                echo "Pre-populating WordPress core files..."
+                cp -rn /usr/src/wordpress/. /var/www/html/
+              fi
+          volumeMounts:
+            - name: html-dir
+              mountPath: /var/www/html
       containers:
         - name: wp-cli-init
           image: wordpress:cli-2.11-php8.2
           imagePullPolicy: IfNotPresent
           volumeMounts:
+            - name: html-dir
+              mountPath: /var/www/html
             - name: wordpress-data
               mountPath: /var/www/html/wp-content
           env:
@@ -59,16 +75,29 @@ spec:
             - /bin/sh
             - -c
             - |
-              echo "Waiting for MariaDB..."
-              until wp db check --path=/var/www/html --dbhost="$WORDPRESS_DB_HOST" --dbuser="$WORDPRESS_DB_USER" --dbpass="$WORDPRESS_DB_PASSWORD" --dbname="$WORDPRESS_DB_NAME" 2>/dev/null; do
+              echo "Waiting for MariaDB connection..."
+              until php -r 'mysqli_report(MYSQLI_REPORT_OFF); exit(mysqli_connect(getenv("WORDPRESS_DB_HOST"), getenv("WORDPRESS_DB_USER"), getenv("WORDPRESS_DB_PASSWORD"), getenv("WORDPRESS_DB_NAME")) ? 0 : 1);'; do
                 echo "MariaDB not ready yet. Waiting 3 seconds..."
                 sleep 3
               done
-              echo "MariaDB is ready!"
+              echo "MariaDB connection established!"
 
               cd /var/www/html
-              if ! wp core is-installed --path=/var/www/html 2>/dev/null; then
-                echo "Installing WordPress..."
+              if [ ! -f /var/www/html/wp-config.php ]; then
+                echo "Generating wp-config.php..."
+                wp config create \
+                  --path=/var/www/html \
+                  --dbhost="$WORDPRESS_DB_HOST" \
+                  --dbuser="$WORDPRESS_DB_USER" \
+                  --dbpass="$WORDPRESS_DB_PASSWORD" \
+                  --dbname="$WORDPRESS_DB_NAME" \
+                  --skip-check \
+                  --force \
+                  --allow-root
+              fi
+
+              if ! wp core is-installed --path=/var/www/html --allow-root 2>/dev/null; then
+                echo "Installing WordPress core..."
                 wp core install \
                   --path=/var/www/html \
                   --url="$WP_URL" \
@@ -76,28 +105,28 @@ spec:
                   --admin_user={{ .Values.store.wordpress.admin.user | quote }} \
                   --admin_password="$WP_ADMIN_PASSWORD" \
                   --admin_email={{ .Values.store.wordpress.admin.email | quote }} \
-                  --skip-email
+                  --skip-email \
+                  --allow-root
               else
-                echo "WordPress is already installed."
+                echo "WordPress core is already installed."
               fi
 
-              # Install and activate WooCommerce
-              if ! wp plugin is-installed woocommerce --path=/var/www/html 2>/dev/null; then
-                echo "Installing WooCommerce plugin..."
-                wp plugin install woocommerce --activate --path=/var/www/html
+              mkdir -p /var/www/html/wp-content/plugins /var/www/html/wp-content/uploads /var/www/html/wp-content/upgrade
+              chmod -R 777 /var/www/html/wp-content
+
+              if ! wp plugin is-installed woocommerce --path=/var/www/html --allow-root 2>/dev/null; then
+                echo "Installing and activating WooCommerce plugin (pinned to 9.4.3 for WP 6.7 compatibility)..."
+                wp plugin install woocommerce --version=9.4.3 --activate --path=/var/www/html --allow-root
               else
-                wp plugin activate woocommerce --path=/var/www/html 2>/dev/null || true
+                wp plugin activate woocommerce --path=/var/www/html --allow-root 2>/dev/null || true
               fi
 
-              # Ensure permalink structure is configured for REST API (pretty permalinks)
-              wp rewrite structure '/%postname%/' --hard --path=/var/www/html 2>/dev/null || true
+              wp rewrite structure '/%postname%/' --hard --path=/var/www/html --allow-root 2>/dev/null || true
 
-              # Enable Cash on Delivery
               echo "Configuring Cash on Delivery payment gateway..."
-              wp option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery.","enable_for_methods":[],"enable_for_virtual":"yes"}' --format=json --path=/var/www/html 2>/dev/null || true
+              wp option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery.","enable_for_methods":[],"enable_for_virtual":"yes"}' --format=json --path=/var/www/html --allow-root 2>/dev/null || true
 
-              # Create sample product if none exist
-              if [ "$(wp post list --post_type=product --format=count --path=/var/www/html 2>/dev/null || echo 0)" -eq 0 ]; then
+              if [ "$(wp post list --post_type=product --format=count --path=/var/www/html --allow-root 2>/dev/null || echo 0)" -eq 0 ]; then
                 echo "Creating demo WooCommerce products..."
                 wp wc product create \
                   --name="MCP Demo Product" \
@@ -105,7 +134,8 @@ spec:
                   --regular_price="25.00" \
                   --description="High quality test product for MCPilot assignment verification" \
                   --user=1 \
-                  --path=/var/www/html || true
+                  --path=/var/www/html \
+                  --allow-root || true
 
                 wp wc product create \
                   --name="Kubernetes Cloud T-Shirt" \
@@ -113,12 +143,14 @@ spec:
                   --regular_price="35.00" \
                   --description="Official cluster merchandise" \
                   --user=1 \
-                  --path=/var/www/html || true
+                  --path=/var/www/html \
+                  --allow-root || true
               fi
 
-              # Verify or generate WooCommerce REST API Key for MCP Server
-              echo "Configuring WooCommerce REST API keys..."
-              wp user meta update 1 woocommerce_api_keys_ready true --path=/var/www/html 2>/dev/null || true
+              echo "Ensuring WooCommerce REST API keys for MCP servers..."
+              php -r "require '/var/www/html/wp-load.php'; global \$wpdb; \$k = 'ck_demo_key_mcpilot'; \$s = 'cs_demo_secret_mcpilot'; \$exists = \$wpdb->get_var(\$wpdb->prepare(\"SELECT key_id FROM {\$wpdb->prefix}woocommerce_api_keys WHERE truncated_key = %s\", substr(\$k, -7))); if (!\$exists) { \$wpdb->insert(\$wpdb->prefix . 'woocommerce_api_keys', ['user_id' => 1, 'description' => 'MCPilot Key', 'permissions' => 'read_write', 'consumer_key' => wc_api_hash(\$k), 'consumer_secret' => \$s, 'truncated_key' => substr(\$k, -7)]); echo 'Created MCPilot WooCommerce API Key' . PHP_EOL; } else { echo 'API Key already exists' . PHP_EOL; }"
 
+              chmod -R 777 /var/www/html/wp-content
+              chown -R 33:33 /var/www/html/wp-content
               echo "WooCommerce store bootstrap complete!"
 {{- end }}

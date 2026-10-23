@@ -31,6 +31,14 @@ spec:
             runAsNonRoot: true
             runAsUser: 999
             allowPrivilegeEscalation: false
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    (until /usr/bin/mariadb-admin ping -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" --silent; do sleep 1; done; /usr/bin/mariadb -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS mcpilot_gateway; GRANT ALL PRIVILEGES ON mcpilot_gateway.* TO '$MYSQL_USER'@'%'; FLUSH PRIVILEGES;") &
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:

@@ -26,18 +26,35 @@ export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-function getAuthHeaders(): HeadersInit {
+export function getAuthHeaders(): HeadersInit {
   const token = getStoredToken();
   return {
     "Content-Type": "application/json",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
+/**
+ * Universal API fetch helper that guarantees no HTTP caching by browsers, proxies, or service workers
+ */
+export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const sep = url.includes("?") ? "&" : "?";
+  const cacheBustedUrl = `${url}${sep}_t=${Date.now()}`;
+  return fetch(cacheBustedUrl, {
+    ...options,
+    headers: {
+      ...getAuthHeaders(),
+      ...(options.headers || {}),
+    },
+    cache: "no-store",
+  });
+}
+
 export async function login(username: string, password: string): Promise<{ token: string; user: User }> {
-  const res = await fetch("/api/auth/login", {
+  const res = await apiFetch("/api/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
@@ -57,9 +74,7 @@ export async function login(username: string, password: string): Promise<{ token
 }
 
 export async function getMe(): Promise<User> {
-  const res = await fetch("/api/auth/me", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/auth/me");
   if (!res.ok) {
     throw new Error("Unauthorized");
   }
@@ -73,10 +88,9 @@ export async function getMe(): Promise<User> {
   };
 }
 
-export async function getServers(): Promise<{ servers: McpServer[]; tools: McpTool[] }> {
-  const res = await fetch("/api/servers", {
-    headers: getAuthHeaders(),
-  });
+export async function getServers(forceRefresh = false): Promise<{ servers: McpServer[]; tools: McpTool[] }> {
+  const query = forceRefresh ? "?refresh=true" : "";
+  const res = await apiFetch(`/api/servers${query}`);
   if (!res.ok) {
     throw new Error("Failed to load servers");
   }
@@ -84,9 +98,8 @@ export async function getServers(): Promise<{ servers: McpServer[]; tools: McpTo
 }
 
 export async function registerServer(payload: { name: string; baseUrl: string; authToken?: string }): Promise<McpServer> {
-  const res = await fetch("/api/servers", {
+  const res = await apiFetch("/api/servers", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -100,9 +113,8 @@ export async function updateServer(
   id: string,
   payload: { name?: string; baseUrl?: string; authToken?: string }
 ): Promise<{ message: string; id: string }> {
-  const res = await fetch(`/api/servers/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/servers/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -113,9 +125,8 @@ export async function updateServer(
 }
 
 export async function deleteServer(id: string): Promise<void> {
-  const res = await fetch(`/api/servers/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/servers/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     throw new Error("Failed to delete server");
@@ -123,9 +134,8 @@ export async function deleteServer(id: string): Promise<void> {
 }
 
 export async function toggleServer(id: string): Promise<{ id: string; enabled: boolean; status: string }> {
-  const res = await fetch(`/api/servers/${encodeURIComponent(id)}/toggle`, {
+  const res = await apiFetch(`/api/servers/${encodeURIComponent(id)}/toggle`, {
     method: "POST",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     throw new Error("Failed to toggle server");
@@ -134,9 +144,7 @@ export async function toggleServer(id: string): Promise<{ id: string; enabled: b
 }
 
 export async function getUsers(): Promise<TeamMember[]> {
-  const res = await fetch("/api/users", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/users");
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to load team members" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -150,9 +158,8 @@ export async function inviteUser(payload: {
   password: string;
   role: "admin" | "member";
 }): Promise<{ message: string; user: TeamMember }> {
-  const res = await fetch("/api/users", {
+  const res = await apiFetch("/api/users", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -163,9 +170,7 @@ export async function inviteUser(payload: {
 }
 
 export async function getKeys(): Promise<ApiKey[]> {
-  const res = await fetch("/api/keys", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/keys");
   if (!res.ok) {
     throw new Error("Failed to load API keys");
   }
@@ -174,9 +179,8 @@ export async function getKeys(): Promise<ApiKey[]> {
 }
 
 export async function createKey(name: string, userId?: string): Promise<ApiKey & { apiKey: string }> {
-  const res = await fetch("/api/keys", {
+  const res = await apiFetch("/api/keys", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ name, userId }),
   });
   if (!res.ok) {
@@ -187,9 +191,8 @@ export async function createKey(name: string, userId?: string): Promise<ApiKey &
 }
 
 export async function revokeKey(id: string): Promise<void> {
-  const res = await fetch(`/api/keys/${encodeURIComponent(id)}/revoke`, {
+  const res = await apiFetch(`/api/keys/${encodeURIComponent(id)}/revoke`, {
     method: "POST",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to revoke key" }));
@@ -203,15 +206,16 @@ export async function getAuditLogs(params?: {
   status?: string;
   search?: string;
 }): Promise<{ logs: AuditLog[]; total: number }> {
-  const url = new URL("/api/audit", window.location.origin);
-  if (params?.limit) url.searchParams.set("limit", String(params.limit));
-  if (params?.offset) url.searchParams.set("offset", String(params.offset));
-  if (params?.status && params.status !== "all") url.searchParams.set("status", params.status);
-  if (params?.search) url.searchParams.set("search", params.search);
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.status && params.status !== "all") searchParams.set("status", params.status);
+  if (params?.search) searchParams.set("search", params.search);
 
-  const res = await fetch(url.toString(), {
-    headers: getAuthHeaders(),
-  });
+  const qs = searchParams.toString();
+  const endpoint = qs ? `/api/audit?${qs}` : "/api/audit";
+
+  const res = await apiFetch(endpoint);
   if (!res.ok) {
     throw new Error("Failed to fetch audit logs");
   }
@@ -223,9 +227,8 @@ export async function fetchLlmModels(options: {
   baseUrl?: string;
   apiKey?: string;
 }): Promise<{ models: string[]; resolvedBaseUrl: string }> {
-  const res = await fetch("/api/chat/models", {
+  const res = await apiFetch("/api/chat/models", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(options),
   });
   if (!res.ok) {
@@ -248,9 +251,8 @@ export async function sendChatMessage(
   content: string;
   toolCallsExecuted?: Array<{ toolName: string; durationMs: number; status: string; args: any; result: any }>;
 }> {
-  const res = await fetch("/api/chat", {
+  const res = await apiFetch("/api/chat", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({
       messages,
       provider: options.provider,
@@ -269,9 +271,7 @@ export async function sendChatMessage(
 // Multi-Store API methods (BONUS-01)
 
 export async function getStores(): Promise<{ stores: StoreEnvironment[]; quota: { maxStoresPerUser: number } }> {
-  const res = await fetch("/api/stores", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/stores");
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to fetch stores" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -280,9 +280,8 @@ export async function getStores(): Promise<{ stores: StoreEnvironment[]; quota: 
 }
 
 export async function provisionStore(payload: { name: string; slug?: string }): Promise<{ message: string; store: StoreEnvironment }> {
-  const res = await fetch("/api/stores", {
+  const res = await apiFetch("/api/stores", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -293,9 +292,8 @@ export async function provisionStore(payload: { name: string; slug?: string }): 
 }
 
 export async function deleteStore(id: string): Promise<{ message: string }> {
-  const res = await fetch(`/api/stores/${id}`, {
+  const res = await apiFetch(`/api/stores/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to delete store" }));
@@ -307,9 +305,7 @@ export async function deleteStore(id: string): Promise<{ message: string }> {
 // Observability & Diagnostics API methods (OBS-01, OBS-02, OBS-03)
 
 export async function fetchMetricsSummary(): Promise<any> {
-  const res = await fetch("/api/metrics/summary", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/metrics/summary");
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to fetch metrics summary" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -319,9 +315,7 @@ export async function fetchMetricsSummary(): Promise<any> {
 
 export async function fetchDiagnostics(serverId?: string): Promise<{ diagnostics: any[] }> {
   const query = serverId ? `?serverId=${encodeURIComponent(serverId)}` : "";
-  const res = await fetch(`/api/diagnostics${query}`, {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch(`/api/diagnostics${query}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to fetch diagnostics" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -332,9 +326,7 @@ export async function fetchDiagnostics(serverId?: string): Promise<{ diagnostics
 // Tool Permissions & RBAC API methods (PERM-04)
 
 export async function fetchPermissions(): Promise<PermissionsResponse> {
-  const res = await fetch("/api/permissions", {
-    headers: getAuthHeaders(),
-  });
+  const res = await apiFetch("/api/permissions");
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to fetch permissions" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -345,9 +337,8 @@ export async function fetchPermissions(): Promise<PermissionsResponse> {
 export async function updateToolPermission(
   payload: ToolPermissionUpdatePayload
 ): Promise<{ success: boolean; id: string; message: string }> {
-  const res = await fetch("/api/permissions", {
+  const res = await apiFetch("/api/permissions", {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -358,9 +349,8 @@ export async function updateToolPermission(
 }
 
 export async function resetPermissionsToDefaults(): Promise<{ success: boolean; message: string }> {
-  const res = await fetch("/api/permissions/reset", {
+  const res = await apiFetch("/api/permissions/reset", {
     method: "POST",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to reset permissions" }));
@@ -370,9 +360,8 @@ export async function resetPermissionsToDefaults(): Promise<{ success: boolean; 
 }
 
 export async function deleteToolPermission(id: string): Promise<{ success: boolean; message: string }> {
-  const res = await fetch(`/api/permissions/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/permissions/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Failed to delete permission" }));
@@ -380,4 +369,3 @@ export async function deleteToolPermission(id: string): Promise<{ success: boole
   }
   return res.json();
 }
-

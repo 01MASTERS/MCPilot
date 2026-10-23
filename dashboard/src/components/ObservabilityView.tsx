@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { MetricsSummary, ServerMetric, DiagnosticReport } from "../types";
 import { fetchMetricsSummary, fetchDiagnostics } from "../services/api";
+import { copyToClipboard } from "../services/clipboard";
 import {
   Pulse,
   Gauge,
@@ -18,12 +19,25 @@ import {
   ChartLine,
 } from "@phosphor-icons/react";
 
-export const ObservabilityView: React.FC = () => {
+interface ObservabilityViewProps {
+  refreshTrigger?: number;
+}
+
+export const ObservabilityView: React.FC<ObservabilityViewProps> = ({ refreshTrigger }) => {
   const [summary, setSummary] = useState<MetricsSummary | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("mcpilot_observability_poll_interval");
+      if (saved !== null) {
+        const parsed = Number(saved);
+        if (!isNaN(parsed)) return parsed;
+      }
+    } catch {}
+    return 5000; // 5s default
+  });
   const [error, setError] = useState<string | null>(null);
-  const [refreshInterval, setRefreshInterval] = useState<number>(5000); // 5s default
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<DiagnosticReport | null>(null);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedRemediation, setCopiedRemediation] = useState(false);
@@ -56,14 +70,22 @@ export const ObservabilityView: React.FC = () => {
     return () => clearInterval(interval);
   }, [refreshInterval]);
 
-  const copyToClipboard = (text: string, type: "snippet" | "remediation") => {
-    navigator.clipboard.writeText(text);
-    if (type === "snippet") {
-      setCopiedSnippet(true);
-      setTimeout(() => setCopiedSnippet(false), 2000);
-    } else {
-      setCopiedRemediation(true);
-      setTimeout(() => setCopiedRemediation(false), 2000);
+  useEffect(() => {
+    if (refreshTrigger) {
+      loadData(true);
+    }
+  }, [refreshTrigger]);
+
+  const copySnippet = async (text: string, type: "snippet" | "remediation") => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      if (type === "snippet") {
+        setCopiedSnippet(true);
+        setTimeout(() => setCopiedSnippet(false), 2000);
+      } else {
+        setCopiedRemediation(true);
+        setTimeout(() => setCopiedRemediation(false), 2000);
+      }
     }
   };
 
@@ -118,25 +140,22 @@ export const ObservabilityView: React.FC = () => {
             <span>Poll:</span>
             <select
               value={refreshInterval}
-              onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              className="bg-transparent text-[#EDEDED] font-mono outline-none cursor-pointer"
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setRefreshInterval(val);
+                try {
+                  localStorage.setItem("mcpilot_observability_poll_interval", String(val));
+                } catch {}
+              }}
+              className="bg-transparent text-[#EDEDED] font-mono text-xs outline-none cursor-pointer border-none p-0 focus:ring-0"
             >
-              <option value={2000} className="bg-[#111111]">2s</option>
-              <option value={5000} className="bg-[#111111]">5s</option>
-              <option value={10000} className="bg-[#111111]">10s</option>
-              <option value={30000} className="bg-[#111111]">30s</option>
-              <option value={0} className="bg-[#111111]">Paused</option>
+              <option value={2000} className="bg-[#111111] text-[#EDEDED]">2s</option>
+              <option value={5000} className="bg-[#111111] text-[#EDEDED]">5s</option>
+              <option value={10000} className="bg-[#111111] text-[#EDEDED]">10s</option>
+              <option value={30000} className="bg-[#111111] text-[#EDEDED]">30s</option>
+              <option value={0} className="bg-[#111111] text-[#EDEDED]">Paused</option>
             </select>
           </div>
-
-          <button
-            onClick={() => loadData(true)}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#111111] hover:bg-[#1a1a1a] text-[#EDEDED] border border-[#222222] hover:border-[#333333] transition-colors disabled:opacity-50"
-          >
-            <ArrowsClockwise size={14} className={loading ? "animate-spin text-[#00DF8F]" : ""} />
-            <span>Refresh</span>
-          </button>
         </div>
       </div>
 
@@ -235,7 +254,7 @@ export const ObservabilityView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() =>
-              copyToClipboard("curl -s http://gateway.local.test:8080/metrics", "snippet")
+              copySnippet("curl -s http://gateway.local.test:8080/metrics", "snippet")
             }
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono rounded bg-[#111111] hover:bg-[#1a1a1a] text-[#888888] hover:text-[#EDEDED] border border-[#222222] transition-colors"
           >
@@ -485,7 +504,7 @@ export const ObservabilityView: React.FC = () => {
                 <label className="text-[10px] font-mono uppercase tracking-wider text-[#888888] flex items-center justify-between">
                   <span>Actionable Remediation Guidance</span>
                   <button
-                    onClick={() => copyToClipboard(selectedDiagnostic.remediation, "remediation")}
+                    onClick={() => copySnippet(selectedDiagnostic.remediation, "remediation")}
                     className="flex items-center gap-1 text-[10px] text-[#00DF8F] hover:underline cursor-pointer"
                   >
                     {copiedRemediation ? <Check size={12} /> : <Copy size={12} />}

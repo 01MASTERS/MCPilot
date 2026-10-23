@@ -72,15 +72,27 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
-    # Allow Gateway connection to Kubernetes API server for store provisioning
+    # Allow Gateway connection to external/local LLM providers, proxies, and Kubernetes API server
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
       ports:
         - protocol: TCP
+          port: 80
+        - protocol: TCP
           port: 443
         - protocol: TCP
           port: 6443
+        - protocol: TCP
+          port: 11434
+        - protocol: TCP
+          port: 1234
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 5000
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -97,11 +109,17 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # Allow MariaDB access strictly from Gateway and WordPress
+    # Allow MariaDB access strictly from Gateway, WordPress, and store-init
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: gateway
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: wordpress
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: store-init
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: store

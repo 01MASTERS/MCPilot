@@ -40,7 +40,7 @@ export function classifyFailure(
   context: { serverId: string; url?: string; toolName?: string }
 ): DiagnosticReport {
   const rawMsg = err?.message || String(err || "");
-  const errCode = (err?.code || "").toUpperCase();
+  const errCode = String(err?.code ?? "").toUpperCase();
   const timestamp = new Date().toISOString();
 
   let code = "ERR_INTERNAL_EXCEPTION";

@@ -4,6 +4,7 @@ import { logToolInvocation } from "./audit.js";
 import { requireAuth } from "./auth.js";
 import { GATEWAY_META_TOOLS } from "./server.js";
 import { searchTools, getToolInfo, formatSearchResultsForLlm } from "./tool-search.js";
+import { canAccessTool, filterToolsForCaller, splitNamespacedTool } from "./permissions.js";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -29,52 +30,96 @@ export interface LlmConfig {
 }
 
 /**
+ * Cleans an Ollama base URL by removing subpaths (/v1, /chat/completions, /models, /api/tags).
+ */
+function cleanOllamaBaseUrl(rawUrl?: string): string {
+  let url = (rawUrl || "").trim().replace(/\/+$/, "");
+  url = url
+    .replace(/\/v1\/chat\/completions\/?$/, "")
+    .replace(/\/chat\/completions\/?$/, "")
+    .replace(/\/v1\/models\/?$/, "")
+    .replace(/\/models\/?$/, "")
+    .replace(/\/api\/tags\/?$/, "")
+    .replace(/\/v1\/?$/, "")
+    .replace(/\/+$/, "");
+  return url || "http://localhost:11434";
+}
+
+/**
  * Resolves local endpoint addressing so containers can reach the Windows host.
  */
-async function resolveEndpointUrl(provider: string, baseUrl?: string): Promise<string> {
+async function resolveEndpointUrl(provider: string, baseUrl?: string, apiKey?: string): Promise<string> {
   let url = (baseUrl || "").trim();
 
   if (provider === "ollama") {
-    if (!url) {
-      url = "http://localhost:11434";
-    }
+    const rootUrl = cleanOllamaBaseUrl(url);
+
     // If localhost or 127.0.0.1, check if accessible directly or via host.docker.internal
-    if (url.includes("localhost") || url.includes("127.0.0.1")) {
+    if (rootUrl.includes("localhost") || rootUrl.includes("127.0.0.1")) {
+      const headers: Record<string, string> = {};
+      if (apiKey?.trim()) {
+        headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+      }
       try {
-        const testRes = await fetch(`${url.replace(/\/+$/, "")}/api/tags`, {
+        const testRes = await fetch(`${rootUrl}/api/tags`, {
+          headers,
           signal: AbortSignal.timeout(800),
         });
-        if (testRes.ok) return url.replace(/\/+$/, "");
+        if (testRes.ok || testRes.status === 401 || testRes.status === 403) return rootUrl;
       } catch {
         // Fallback to Docker host alias
-        const dockerHostUrl = url
+        const dockerHostUrl = rootUrl
           .replace("localhost", "host.docker.internal")
-          .replace("127.0.0.1", "host.docker.internal")
-          .replace(/\/+$/, "");
+          .replace("127.0.0.1", "host.docker.internal");
         try {
           const testRes = await fetch(`${dockerHostUrl}/api/tags`, {
+            headers,
             signal: AbortSignal.timeout(1500),
           });
-          if (testRes.ok) return dockerHostUrl;
+          if (testRes.ok || testRes.status === 401 || testRes.status === 403) return dockerHostUrl;
         } catch {
           // If still failing, return dockerHostUrl anyway as it is standard in k3d
           return dockerHostUrl;
         }
       }
     }
-    return url.replace(/\/+$/, "");
+    return rootUrl;
   }
 
   if (provider === "openai") {
-    return (url || "https://api.openai.com/v1").replace(/\/+$/, "");
+    let clean = (url || "https://api.openai.com/v1").replace(/\/+$/, "");
+    clean = clean.replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "");
+    return clean;
   }
 
   if (provider === "openrouter") {
-    return (url || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+    let clean = (url || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+    clean = clean.replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "");
+    return clean;
   }
 
   // Custom provider
-  return (url || "http://localhost:11434").replace(/\/+$/, "");
+  let clean = (url || "http://localhost:11434").replace(/\/+$/, "");
+  clean = clean.replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "");
+  if (clean.includes("localhost") || clean.includes("127.0.0.1")) {
+    const headers: Record<string, string> = {};
+    if (apiKey?.trim()) {
+      headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+    }
+    try {
+      const testRes = await fetch(clean.endsWith("/models") ? clean : `${clean}/models`, {
+        headers,
+        signal: AbortSignal.timeout(800),
+      });
+      if (testRes.ok || testRes.status === 401 || testRes.status === 403) return clean;
+    } catch {
+      const dockerHostUrl = clean
+        .replace("localhost", "host.docker.internal")
+        .replace("127.0.0.1", "host.docker.internal");
+      return dockerHostUrl;
+    }
+  }
+  return clean;
 }
 
 export class ChatAgentRunner {
@@ -88,19 +133,47 @@ export class ChatAgentRunner {
     rawBaseUrl?: string,
     apiKey?: string
   ): Promise<{ models: string[]; resolvedBaseUrl: string }> {
-    const resolvedUrl = await resolveEndpointUrl(provider, rawBaseUrl);
+    const resolvedUrl = await resolveEndpointUrl(provider, rawBaseUrl, apiKey);
 
     if (provider === "ollama") {
-      const targetUrl = `${resolvedUrl}/api/tags`;
-      const res = await fetch(targetUrl, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) {
-        throw new Error(`Ollama returned status ${res.status} from ${targetUrl}`);
+      const headers: Record<string, string> = {};
+      if (apiKey?.trim()) {
+        headers["Authorization"] = `Bearer ${apiKey.trim()}`;
+      } else {
+        headers["Authorization"] = "Bearer ollama";
       }
-      const data: any = await res.json();
-      const models = Array.isArray(data?.models)
-        ? data.models.map((m: any) => m.name || m.model).filter(Boolean)
-        : [];
-      return { models, resolvedBaseUrl: resolvedUrl };
+
+      // First try native Ollama /api/tags
+      try {
+        const targetUrl = `${resolvedUrl}/api/tags`;
+        const res = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(5000) });
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          const models = Array.isArray(data?.models)
+            ? data.models.map((m: any) => m.name || m.model).filter(Boolean)
+            : [];
+          return { models, resolvedBaseUrl: resolvedUrl };
+        }
+      } catch {
+        // Fall through to /v1/models attempt
+      }
+
+      // Fallback: try OpenAI-compatible /v1/models (supported by Ollama and proxies)
+      try {
+        const targetUrl = `${resolvedUrl}/v1/models`;
+        const res = await fetch(targetUrl, { headers, signal: AbortSignal.timeout(5000) });
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          const models = Array.isArray(data?.data)
+            ? data.data.map((m: any) => m.id).filter(Boolean)
+            : [];
+          return { models, resolvedBaseUrl: resolvedUrl };
+        }
+      } catch {
+        // Fall through
+      }
+
+      throw new Error(`Failed to reach Ollama at ${resolvedUrl} (tried /api/tags and /v1/models). Ensure Ollama is running and accessible.`);
     }
 
     // OpenAI / OpenRouter / Custom /models endpoint
@@ -108,7 +181,7 @@ export class ChatAgentRunner {
     const targetUrl = cleanBase.endsWith("/models") ? cleanBase : `${cleanBase}/models`;
 
     const headers: Record<string, string> = {};
-    if (apiKey) {
+    if (apiKey?.trim()) {
       headers["Authorization"] = `Bearer ${apiKey.trim()}`;
     }
     if (provider === "openrouter") {
@@ -152,25 +225,23 @@ export class ChatAgentRunner {
       throw new Error("No model selected. Please select or auto-fetch a model from the topbar.");
     }
 
-    const resolvedBase = await resolveEndpointUrl(provider, baseUrl);
+    const resolvedBase = await resolveEndpointUrl(provider, baseUrl, apiKey);
 
-    // Compute completions URL
+    // Compute completions URL cleanly without duplicate /v1 or /chat/completions
     let completionsUrl: string;
-    if (provider === "ollama") {
-      // Ollama OpenAI-compatible chat endpoint is at /v1/chat/completions
-      completionsUrl = resolvedBase.endsWith("/v1")
-        ? `${resolvedBase}/chat/completions`
-        : `${resolvedBase}/v1/chat/completions`;
+    const cleanBase = resolvedBase.replace(/\/+$/, "");
+    if (cleanBase.endsWith("/chat/completions")) {
+      completionsUrl = cleanBase;
+    } else if (cleanBase.endsWith("/v1")) {
+      completionsUrl = `${cleanBase}/chat/completions`;
     } else {
-      const cleanBase = resolvedBase.replace(/\/+$/, "");
-      completionsUrl = cleanBase.endsWith("/chat/completions")
-        ? cleanBase
-        : `${cleanBase}/chat/completions`;
+      completionsUrl = `${cleanBase}/v1/chat/completions`;
     }
 
-    const tools = await this.toolAggregator.getAllNamespacedTools();
-    const allTools = [...tools, ...GATEWAY_META_TOOLS];
-    const formattedTools = allTools.map((t) => ({
+    const allTools = await this.toolAggregator.getAllNamespacedTools();
+    // Strictly filter tools based on caller's RBAC role and active policies (UI-06, PERM-01)
+    const authorizedTools = filterToolsForCaller(allTools, caller as any);
+    const formattedTools = [...authorizedTools, ...GATEWAY_META_TOOLS].map((t) => ({
       type: "function",
       function: {
         name: t.name,
@@ -184,9 +255,19 @@ export class ChatAgentRunner {
       content:
         `You are MCPilot, an autonomous AI gateway assistant managing connected MCP servers and multi-store WooCommerce environments.\n` +
         `Current user: ${caller.username} (Role: ${caller.role}).\n` +
-        `You have access to federated tools across multiple store environments (namespaced as store_<slug>__woocommerce__*) and meta-tools ('gateway__search_tools', 'gateway__get_tool_info', 'gateway__execute_tool') for large-fleet progressive tool discovery.\n` +
-        `When asked to compare orders, products, or metrics across stores, execute the corresponding tools for each store (e.g. store_alpha__woocommerce__list_orders and store_beta__woocommerce__list_orders) and provide a structured side-by-side comparative summary.\n` +
-        `Always invoke relevant federated tools to query live data, product details, or operational metrics before responding.\n` +
+        (caller.role === "member"
+          ? `ROLE CONSTRAINT: You are operating under role 'member'. You only have permission to execute read-only queries (e.g. list products, list orders, revenue summaries, store metrics). You are strictly prohibited from mutating data (such as creating products, updating order statuses, or modifying store data). If the user asks to modify or create resources, politely explain that role 'member' does not have permission to execute mutating actions.\n`
+          : `ROLE PRIVILEGE: You are operating under role 'admin' with full administrative authority to execute both read and mutating operations across all connected servers.\n`) +
+        `Available tools include:\n` +
+        `- Core WooCommerce tools ('woocommerce__list_products', 'woocommerce__create_product', 'woocommerce__list_orders', 'woocommerce__get_order', 'woocommerce__update_order_status')\n` +
+        `- Analytics tools ('analytics__get_revenue_summary', 'analytics__get_store_metrics', 'analytics__get_inventory_status')\n` +
+        `- System & Time tools ('time__get_current_time')\n` +
+        `- Dynamically provisioned store environments ('store_<slug>__*')\n` +
+        `- Discovery meta-tools ('gateway__search_tools', 'gateway__get_tool_info', 'gateway__execute_tool')\n\n` +
+        `CRITICAL TOOL CALLING INSTRUCTIONS:\n` +
+        `1. DIRECT INVOCATION: When the user asks to list products, create products, list orders, or check revenue, ALWAYS DIRECTLY CALL the corresponding tool ('woocommerce__list_products', 'analytics__get_revenue_summary', etc.) from your tool list. NEVER call 'gateway__search_tools' when the exact tool is already present in your tool catalog.\n` +
+        `2. MULTI-STORE COMPARISON: When asked to compare orders, products, or metrics across stores, execute the corresponding tools for each store (e.g. 'woocommerce__list_orders' and 'store_<slug>__*') and provide a structured side-by-side comparative summary.\n` +
+        `3. PROGRESSIVE DISCOVERY: Only call 'gateway__search_tools' if you do not know which tool can handle the user's request. If you search and find a matching tool, you MUST immediately call that tool to fulfill the user's request.\n` +
         `Provide concise, professional responses in markdown format.`,
     };
 
@@ -208,111 +289,102 @@ export class ChatAgentRunner {
       requestHeaders["X-Title"] = "MCPilot Gateway";
     }
 
-    // Step 1: Request initial response or tool calls
-    let res1: globalThis.Response;
-    try {
-      res1 = await fetch(completionsUrl, {
-        method: "POST",
-        headers: requestHeaders,
-        body: JSON.stringify({
-          model: model.trim(),
-          messages: conversation,
-          tools: formattedTools.length > 0 ? formattedTools : undefined,
-          tool_choice: formattedTools.length > 0 ? "auto" : undefined,
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(60000),
-      });
-    } catch (err: any) {
-      throw new Error(
-        `Failed to reach LLM at ${completionsUrl} (${err.message}). Verify your endpoint is online and accessible.`
-      );
-    }
+    // Autonomous multi-turn agentic loop (supports follow-up tool calls, e.g. search -> execute tool)
+    let iterations = 0;
+    const maxIterations = 4;
+    let finalContent = "";
 
-    if (!res1.ok) {
-      const errorText = await res1.text().catch(() => "");
-      throw new Error(`LLM API returned HTTP ${res1.status}: ${errorText.slice(0, 200)}`);
-    }
+    while (iterations < maxIterations) {
+      iterations++;
 
-    const data1: any = await res1.json();
-    const choice1 = data1.choices?.[0];
-    const assistantMessage = choice1?.message;
-
-    if (!assistantMessage) {
-      throw new Error("LLM returned an empty response. Verify model configuration.");
-    }
-
-    // Check if the assistant requested tool calls
-    if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
-      conversation.push(assistantMessage);
-
-      for (const tc of assistantMessage.tool_calls) {
-        const toolName = tc.function.name;
-        let toolArgs: any = {};
-        try {
-          toolArgs =
-            typeof tc.function.arguments === "string"
-              ? JSON.parse(tc.function.arguments || "{}")
-              : tc.function.arguments || {};
-        } catch {
-          toolArgs = {};
-        }
-
-        const execRecord = await this.executeAndLogTool(toolName, toolArgs, caller);
-        executedTools.push(execRecord);
-
-        // Tool result message back to LLM
-        let resultContent = "";
-        try {
-          resultContent = JSON.stringify(execRecord.result);
-        } catch {
-          resultContent = String(execRecord.result);
-        }
-
-        conversation.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          name: toolName,
-          content: resultContent,
-        });
-      }
-
-      // Step 2: Final response from LLM incorporating tool results
-      let res2: globalThis.Response;
+      let res: globalThis.Response;
       try {
-        res2 = await fetch(completionsUrl, {
+        res = await fetch(completionsUrl, {
           method: "POST",
           headers: requestHeaders,
           body: JSON.stringify({
             model: model.trim(),
             messages: conversation,
+            tools: formattedTools.length > 0 ? formattedTools : undefined,
+            tool_choice: formattedTools.length > 0 ? "auto" : undefined,
             temperature: 0.2,
           }),
           signal: AbortSignal.timeout(60000),
         });
       } catch (err: any) {
-        throw new Error(`Failed to get final LLM completion after tool execution: ${err.message}`);
+        throw new Error(
+          `Failed to reach LLM at ${completionsUrl} (${err.message}). Verify your endpoint is online and accessible.`
+        );
       }
 
-      if (!res2.ok) {
-        const errorText = await res2.text().catch(() => "");
-        throw new Error(`LLM final response returned HTTP ${res2.status}: ${errorText.slice(0, 200)}`);
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        throw new Error(`LLM API returned HTTP ${res.status}: ${errorText.slice(0, 200)}`);
       }
 
-      const data2: any = await res2.json();
-      const choice2 = data2.choices?.[0];
+      const data: any = await res.json();
+      const choice = data.choices?.[0];
+      const assistantMessage = choice?.message;
 
-      return {
-        role: "assistant",
-        content: choice2?.message?.content || "Executed tools successfully.",
-        toolCallsExecuted: executedTools,
-      };
+      if (!assistantMessage) {
+        throw new Error("LLM returned an empty response. Verify model configuration.");
+      }
+
+      // Check if the assistant requested tool calls
+      if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+        conversation.push(assistantMessage);
+
+        // Execute tool calls concurrently in parallel (reduces latency when LLM invokes multiple tools)
+        const executionPromises = assistantMessage.tool_calls.map(async (tc: any) => {
+          const toolName = tc.function.name;
+          let toolArgs: any = {};
+          try {
+            toolArgs =
+              typeof tc.function.arguments === "string"
+                ? JSON.parse(tc.function.arguments || "{}")
+                : tc.function.arguments || {};
+          } catch {
+            toolArgs = {};
+          }
+
+          const execRecord = await this.executeAndLogTool(toolName, toolArgs, caller);
+          return { tc, execRecord };
+        });
+
+        const executedResults = await Promise.all(executionPromises);
+
+        for (const { tc, execRecord } of executedResults) {
+          executedTools.push(execRecord);
+
+          // Tool result message back to LLM
+          let resultContent = "";
+          try {
+            resultContent = JSON.stringify(execRecord.result);
+          } catch {
+            resultContent = String(execRecord.result);
+          }
+
+          conversation.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            name: tc.function.name,
+            content: resultContent,
+          });
+        }
+
+        // Loop continues: LLM evaluates tool results and can call the actual target tool or write final response
+        continue;
+      }
+
+      // No more tool calls: final response generated
+      finalContent = assistantMessage.content || "Executed tools successfully.";
+      break;
     }
 
     return {
       role: "assistant",
-      content: assistantMessage.content || "Ready.",
-      toolCallsExecuted: [],
+      content: finalContent || "Executed tools successfully.",
+      toolCallsExecuted: executedTools,
     };
   }
 
@@ -349,7 +421,18 @@ export class ChatAgentRunner {
         const targetArgs = (args?.arguments as Record<string, any>) || {};
         return this.executeAndLogTool(targetTool, targetArgs, caller);
       } else {
-        result = await this.toolAggregator.dispatchCall(toolName, args);
+        // Enforce strict RBAC permission checks on all direct tool executions (UI-06, PERM-03)
+        const { serverId: targetServerId, rawToolName } = splitNamespacedTool(toolName);
+        const allowed = canAccessTool(caller as any, targetServerId, rawToolName);
+        if (!allowed) {
+          const errorMsg = `Forbidden: User '${caller.username}' with role '${caller.role}' is not authorized to execute tool '${toolName}'.`;
+          result = {
+            isError: true,
+            content: [{ type: "text", text: errorMsg }],
+          };
+        } else {
+          result = await this.toolAggregator.dispatchCall(toolName, args);
+        }
       }
       const durationMs = Date.now() - startTime;
       const isError = Boolean(result?.isError);

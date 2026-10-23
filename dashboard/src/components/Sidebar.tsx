@@ -14,6 +14,8 @@ import {
   ShieldCheck,
 } from "@phosphor-icons/react";
 
+import { copyToClipboard } from "../services/clipboard";
+
 interface SidebarProps {
   activeTab: "servers" | "stores" | "observability" | "permissions" | "keys" | "audit" | "chat";
   setActiveTab: (tab: "servers" | "stores" | "observability" | "permissions" | "keys" | "audit" | "chat") => void;
@@ -30,10 +32,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [copied, setCopied] = useState(false);
   const gatewayUrl = `${window.location.protocol}//${window.location.host}/mcp`;
 
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(gatewayUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyUrl = async () => {
+    const ok = await copyToClipboard(gatewayUrl);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const navItems = [
