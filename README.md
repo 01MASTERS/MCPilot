@@ -281,25 +281,30 @@ MCPilot implements the optional "Ways to Stand Out" from Page 6 of the assignmen
 Run this single-line command (works identically in **PowerShell**, **Command Prompt**, and **Bash**):
 
 ```bash
-k3d cluster create mcpilot -p "8080:80@loadbalancer" -p "8443:443@loadbalancer"
+k3d cluster create mcpilot --api-port 127.0.0.1:6443 -p "8080:80@loadbalancer" -p "8443:443@loadbalancer"
 ```
+
+> **Why `--api-port 127.0.0.1:6443`?**: Binds the Kubernetes API server directly to `127.0.0.1:6443` in your `kubeconfig`. This prevents Windows Docker Desktop from generating `0.0.0.0` or `host.docker.internal` addresses that cause `cluster unreachable` errors.
 
 *(Alternatively, if you prefer multi-line syntax, choose your terminal below)*:
 - **PowerShell (Windows)**:
   ```powershell
   k3d cluster create mcpilot `
+    --api-port 127.0.0.1:6443 `
     -p "8080:80@loadbalancer" `
     -p "8443:443@loadbalancer"
   ```
 - **Command Prompt (Windows cmd.exe)**:
   ```cmd
   k3d cluster create mcpilot ^
+    --api-port 127.0.0.1:6443 ^
     -p "8080:80@loadbalancer" ^
     -p "8443:443@loadbalancer"
   ```
 - **Bash (Linux / macOS)**:
   ```bash
   k3d cluster create mcpilot \
+    --api-port 127.0.0.1:6443 \
     -p "8080:80@loadbalancer" \
     -p "8443:443@loadbalancer"
   ```
