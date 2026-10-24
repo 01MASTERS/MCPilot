@@ -18,8 +18,8 @@
     "verify:role-matrix": "node scripts/verify-role-matrix.mjs",
     "metrics:populate": "node scripts/populate-metrics.mjs",
     "verify:all": "node scripts/verify-all.mjs",
-    "docker:build": "docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time",
-    "k3d:import": "k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest -c mcpilot"
+    "docker:build": "docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time && docker build -t mcpilot-store-init:latest ./docker/store-init",
+    "k3d:import": "k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest mcpilot-store-init:latest -c mcpilot"
   },
   "keywords": [
     "mcp",

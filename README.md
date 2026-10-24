@@ -215,11 +215,8 @@ The MCPilot platform is designed with a cloud-native architecture that runs loca
 To upgrade the Gateway or upstream MCP servers without interrupting connected AI agents:
 
 ```bash
-# Upgrade the Gateway image to a new version with production values
-helm upgrade mcpilot ./helm/mcpilot \
-  -f ./helm/mcpilot/values-prod.yaml \
-  --set gateway.image.tag=v1.2.0 \
-  --wait --timeout 120s
+# Upgrade the Gateway image to a new version with production values (cross-platform single line)
+helm upgrade mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-prod.yaml --set gateway.image.tag=v1.2.0 --wait --timeout 120s
 ```
 
 **Health Probe Verification**: The Gateway deployment defines Kubernetes `readinessProbe` (HTTP `/health` on port 8000). During rolling upgrade:
@@ -266,76 +263,179 @@ MCPilot implements the optional "Ways to Stand Out" from Page 6 of the assignmen
 
 ## 8. Quickstart & Deployment Guide
 
+> **Terminal & Shell Consistency Notice**:
+> Commands below are provided with explicit syntax for **PowerShell (Windows)**, **Command Prompt (Windows cmd.exe)**, and **Bash (Linux/macOS)**. Where commands are shell-agnostic (like `npm`, `kubectl`, and `helm`), standard single-line syntax is used so you can copy and paste directly into any terminal without escaping or continuation errors.
+
 ### Prerequisites
-- Docker Desktop or Docker Engine
-- `k3d` (or Minikube / k3s)
-- `kubectl`
+- Docker Desktop (or Docker Engine on Linux) running
+- `k3d` (v5.0+)
+- `kubectl` (v1.28+)
 - `helm` (v3.10+)
-- `node` (v18+)
-
-### Local Kubernetes (k3d)
-
-1. **Create the k3d cluster with Ingress port mapping**:
-   - **PowerShell (Windows)**:
-     ```powershell
-     k3d cluster create mcpilot -p "8080:80@loadbalancer" -p "8443:443@loadbalancer"
-     ```
-     *(Or multi-line using the PowerShell backtick `` ` `` continuation character)*:
-     ```powershell
-     k3d cluster create mcpilot `
-       -p "8080:80@loadbalancer" `
-       -p "8443:443@loadbalancer"
-     ```
-   - **Bash / Linux / macOS**:
-     ```bash
-     k3d cluster create mcpilot \
-       -p "8080:80@loadbalancer" \
-       -p "8443:443@loadbalancer"
-     ```
-
-2. **Build and Import Local Container Images into k3d**:
-   Build the gateway and custom MCP microservice images and load them directly into the cluster:
-   ```bash
-   npm run docker:build
-   npm run k3d:import
-   ```
-   *(Or manually: `docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time && k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest -c mcpilot`)*
-
-3. **Configure Local Domains in your hosts file**:
-   Add the following line to `C:\Windows\System32\drivers\etc\hosts` (Windows) or `/etc/hosts` (macOS/Linux):
-   ```text
-   127.0.0.1 gateway.local.test store.local.test
-   ```
-   *(Optional fallback: If you cannot edit hosts, port-forward directly: `kubectl port-forward svc/mcpilot-gateway 8000:8000`)*
-
-4. **Deploy the Unified Helm Chart**:
-   ```bash
-   helm install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-local.yaml
-   ```
-   > **Windows Tip**: If `helm` or `kubectl` report `cluster unreachable` connecting to `host.docker.internal`, point your kubeconfig directly to loopback:
-   > ```powershell
-   > kubectl config set-cluster k3d-mcpilot --server=https://127.0.0.1:<port>
-   > ```
-   > Find the port with `docker ps --filter "name=k3d-mcpilot-serverlb"` (e.g., `58916`).
-
-5. **Verify Pod Readiness**:
-   ```bash
-   kubectl get pods -l app.kubernetes.io/name=mcpilot
-   ```
-   *Expected: All 6 pods (`mcpilot-gateway`, `mcpilot-mariadb-0`, `mcpilot-woocommerce-mcp`, `mcpilot-analytics-mcp`, `mcpilot-time-mcp`, `mcpilot-wordpress`) running and ready.*
-
-6. **Access the Applications**:
-   - **Management Dashboard**: [http://gateway.local.test:8080/](http://gateway.local.test:8080/) (or `http://localhost:8000` via `kubectl port-forward svc/mcpilot-gateway 8000:8000`)
-   - **WooCommerce Storefront**: [http://store.local.test:8080/](http://store.local.test:8080/)
-   - **Pre-seeded Accounts**:
-     - Admin: `admin` / `admin123`
-     - Member: `alex` / `alex123`
+- `node` (v18+) & `npm`
 
 ---
 
-### Production VPS (k3s)
+### Local Kubernetes Deployment (k3d)
 
-1. **Generate High-Entropy Production Secrets**:
+#### Step 1: Create the k3d cluster with Ingress port mapping
+Run this single-line command (works identically in **PowerShell**, **Command Prompt**, and **Bash**):
+
+```bash
+k3d cluster create mcpilot -p "8080:80@loadbalancer" -p "8443:443@loadbalancer"
+```
+
+*(Alternatively, if you prefer multi-line syntax, choose your terminal below)*:
+- **PowerShell (Windows)**:
+  ```powershell
+  k3d cluster create mcpilot `
+    -p "8080:80@loadbalancer" `
+    -p "8443:443@loadbalancer"
+  ```
+- **Command Prompt (Windows cmd.exe)**:
+  ```cmd
+  k3d cluster create mcpilot ^
+    -p "8080:80@loadbalancer" ^
+    -p "8443:443@loadbalancer"
+  ```
+- **Bash (Linux / macOS)**:
+  ```bash
+  k3d cluster create mcpilot \
+    -p "8080:80@loadbalancer" \
+    -p "8443:443@loadbalancer"
+  ```
+
+---
+
+#### Step 2: Build and Import Local Container Images into k3d
+Build all 5 microservices and store-init bootstrap images, then load them directly into the k3d cluster:
+
+```bash
+npm run docker:build
+npm run k3d:import
+```
+
+> **What this does**: Automatically builds and imports `mcpilot-gateway:latest`, `mcpilot-woocommerce-mcp:latest`, `mcpilot-analytics-mcp:latest`, `mcpilot-time-mcp:latest`, and `mcpilot-store-init:latest` into the k3d cluster image registry.
+
+*(Manual alternative without npm)*:
+- **PowerShell (Windows)**:
+  ```powershell
+  docker build -t mcpilot-gateway:latest ./gateway; docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce; docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics; docker build -t mcpilot-time-mcp:latest ./mcp-servers/time; docker build -t mcpilot-store-init:latest ./docker/store-init
+  k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest mcpilot-store-init:latest -c mcpilot
+  ```
+- **Command Prompt (Windows cmd.exe)**:
+  ```cmd
+  docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time && docker build -t mcpilot-store-init:latest ./docker/store-init
+  k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest mcpilot-store-init:latest -c mcpilot
+  ```
+- **Bash (Linux / macOS)**:
+  ```bash
+  docker build -t mcpilot-gateway:latest ./gateway && docker build -t mcpilot-woocommerce-mcp:latest ./mcp-servers/woocommerce && docker build -t mcpilot-analytics-mcp:latest ./mcp-servers/analytics && docker build -t mcpilot-time-mcp:latest ./mcp-servers/time && docker build -t mcpilot-store-init:latest ./docker/store-init
+  k3d image import mcpilot-gateway:latest mcpilot-woocommerce-mcp:latest mcpilot-analytics-mcp:latest mcpilot-time-mcp:latest mcpilot-store-init:latest -c mcpilot
+  ```
+
+---
+
+#### Step 3: Configure Local Domains in your hosts file
+Map `gateway.local.test` and `store.local.test` to `127.0.0.1`.
+
+- **File Path**:
+  - Windows: `C:\Windows\System32\drivers\etc\hosts`
+  - Linux / macOS: `/etc/hosts`
+- **Entry to add**:
+  ```text
+  127.0.0.1 gateway.local.test store.local.test
+  ```
+
+*(Fast CLI one-liners — run terminal as Administrator / root)*:
+- **PowerShell (Run as Administrator)**:
+  ```powershell
+  Add-Content -Path "$env:SystemRoot\System32\drivers\etc\hosts" -Value "`n127.0.0.1 gateway.local.test store.local.test"
+  ```
+- **Command Prompt (Run as Administrator)**:
+  ```cmd
+  echo 127.0.0.1 gateway.local.test store.local.test >> %SystemRoot%\System32\drivers\etc\hosts
+  ```
+- **Bash (Linux / macOS)**:
+  ```bash
+  echo "127.0.0.1 gateway.local.test store.local.test" | sudo tee -a /etc/hosts
+  ```
+
+*(Zero-hosts fallback: If you cannot modify your hosts file, port-forward directly: `kubectl port-forward svc/mcpilot-gateway 8000:8000` to access the dashboard at `http://localhost:8000`)*.
+
+---
+
+#### Step 4: Deploy the Unified Helm Chart
+Deploy or upgrade the platform with local development values (safe and idempotent):
+
+```bash
+helm upgrade --install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-local.yaml
+```
+
+> **Windows Docker Desktop Troubleshooting**:
+> If `helm` or `kubectl` output `cluster unreachable` connecting to `host.docker.internal`:
+> 1. Find the loopback port of the k3d load balancer:
+>    - **PowerShell / CMD**: `docker ps --filter "name=k3d-mcpilot-serverlb"`
+> 2. Point kubectl directly to `127.0.0.1`:
+>    - `kubectl config set-cluster k3d-mcpilot --server=https://127.0.0.1:<PORT>` (e.g. `58916`)
+
+---
+
+#### Step 5: Verify Pod Readiness
+Check that all workloads are up and healthy:
+
+```bash
+kubectl get pods -l app.kubernetes.io/name=mcpilot
+```
+
+*(Or wait automatically until all pods are ready)*:
+```bash
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mcpilot --timeout=180s
+```
+
+**Expected Workload Status**:
+| Workload | Type | Expected Status | Purpose |
+| :--- | :--- | :--- | :--- |
+| `mcpilot-gateway-...` | Pod | `Running (1/1)` | Express MCP Gateway & React SPA Dashboard |
+| `mcpilot-mariadb-0` | Pod (StatefulSet) | `Running (1/1)` | MariaDB (`wordpress` & `mcpilot_gateway` schemas) |
+| `mcpilot-wordpress-...` | Pod | `Running (1/1)` | WordPress Storefront with WooCommerce |
+| `mcpilot-woocommerce-mcp-...` | Pod | `Running (1/1)` | Standalone WooCommerce MCP Server |
+| `mcpilot-analytics-mcp-...` | Pod | `Running (1/1)` | Store Analytics MCP Server |
+| `mcpilot-time-mcp-...` | Pod | `Running (1/1)` | Business Hours & Delivery Cutoff MCP Server |
+| `mcpilot-init-store-...` | Pod (Job) | `Completed (0/1)` | One-time store database seeder & product populator |
+
+---
+
+#### Step 6: Access Applications & Pre-Seeded Accounts
+
+| Application / Service | URL | Role | Username | Password |
+| :--- | :--- | :--- | :--- | :--- |
+| **Management Dashboard** | [http://gateway.local.test:8080/](http://gateway.local.test:8080/) | Administrator | `admin` | `admin123` |
+| **Management Dashboard** | [http://gateway.local.test:8080/](http://gateway.local.test:8080/) | Team Member | `alex` | `alex123` |
+| **WooCommerce Storefront** | [http://store.local.test:8080/](http://store.local.test:8080/) | Customer | *(Public)* | Cash on Delivery test checkout |
+| **WooCommerce WP-Admin** | [http://store.local.test:8080/wp-admin](http://store.local.test:8080/wp-admin) | Store Admin | `admin` | `admin_super_secure_password` |
+| **Gateway Direct Port-Forward** | [http://localhost:8000/](http://localhost:8000/) | *(Optional)* | Run `kubectl port-forward svc/mcpilot-gateway 8000:8000` |
+
+---
+
+#### Step 7: Cluster Lifecycle Management
+- **Pause Cluster** (saves CPU/RAM when not developing):
+  ```bash
+  k3d cluster stop mcpilot
+  ```
+- **Resume Cluster**:
+  ```bash
+  k3d cluster start mcpilot
+  ```
+- **Tear Down & Clean Everything**:
+  ```bash
+  k3d cluster delete mcpilot
+  ```
+
+---
+
+### Production VPS Deployment (k3s)
+
+1. **Generate High-Entropy Production Secrets** (Linux / macOS / WSL):
    ```bash
    bash scripts/generate-prod-secrets.sh secrets-prod.yaml
    kubectl apply -f secrets-prod.yaml
@@ -343,7 +443,7 @@ MCPilot implements the optional "Ways to Stand Out" from Page 6 of the assignmen
 
 2. **Deploy with Production Values**:
    ```bash
-   helm install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-prod.yaml
+   helm upgrade --install mcpilot ./helm/mcpilot -f ./helm/mcpilot/values-prod.yaml
    ```
    *Features enabled in `values-prod.yaml`: 2 Gateway replicas, Let's Encrypt TLS annotations via `cert-manager`, CPU/RAM resource quotas, and hardened non-root container security contexts (`INFRA-02`, `INFRA-06`).*
 
@@ -380,12 +480,12 @@ In Cursor **Settings > Features > MCP**, click **Add New MCP Server**:
 - **Header**: `Authorization: Bearer YOUR_MCP_LIVE_API_KEY`
 
 ### Official MCP Inspector
-To interactively inspect and test tools in your browser:
+To interactively inspect and test tools in your browser (cross-platform single line):
 ```bash
-npx @modelcontextprotocol/inspector http://localhost:8000/mcp \
-  --transport http \
-  --header "Authorization: Bearer YOUR_MCP_LIVE_API_KEY"
+npx @modelcontextprotocol/inspector http://gateway.local.test:8080/mcp --transport http --header "Authorization: Bearer YOUR_MCP_LIVE_API_KEY"
 ```
+*(Or via port-forward: `npx @modelcontextprotocol/inspector http://localhost:8000/mcp --transport http --header "Authorization: Bearer YOUR_MCP_LIVE_API_KEY"`)*
+
 
 ---
 
