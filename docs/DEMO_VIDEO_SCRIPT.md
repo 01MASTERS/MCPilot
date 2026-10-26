@@ -118,18 +118,18 @@ npm run metrics:populate
 2. **[SCREEN]**: Point out that Alex has the `member` role badge. Show that the **Add Server** button is hidden or disabled for members.
 3. **[ACTION]**: Click **API Keys** in the sidebar. Click **Generate API Key**, name it `"Alex Cursor Key"`, and click Create.
 4. **[SCREEN]**: Show the modal revealing the secret key `mcp_live_...`. Click **Copy Key**.
-5. **[ACTION]**: In Terminal, run the automated User B external client test:
+5. **[ACTION]**: In Terminal, connect User B's external client using the copied key:
    ```bash
-   node scripts/verify-user-b.mjs
+   node scripts/verify-user-b.mjs <PASTE_COPIED_KEY>
    ```
-   *(Or connect via MCP Inspector / Cursor)*:
+   *(Or run `node scripts/verify-user-b.mjs` with no arguments to let the script auto-generate a key and verify; or connect via MCP Inspector / Cursor)*:
    ```bash
-   npx @modelcontextprotocol/inspector http://gateway.local.test:8080/mcp --transport http --header "Authorization: Bearer <ALEX_KEY>"
+   npx @modelcontextprotocol/inspector http://gateway.local.test:8080/mcp --transport http --header "Authorization: Bearer <PASTE_COPIED_KEY>"
    ```
 6. **[SCREEN]**: Show the terminal output:
-   - Connects to `POST /mcp` via Streamable HTTP.
-   - Lists 11 federated tools.
-   - Executes multi-server prompt combining `woocommerce__list_orders` and `time__calculate_delivery_window` or `analytics__get_revenue_summary`.
+   - Connects to `POST /mcp` via Streamable HTTP using the key.
+   - Lists aggregated tools.
+   - Executes multi-server prompt combining `woocommerce__list_products`, `analytics__get_revenue_summary`, and `time__get_current_time`.
 
 ### Spoken Narration Script
 > *"Now let's test User B — a regular team member named Alex. I've logged into Alex's account in this incognito window. Alex has the 'Member' role. Notice the principle of least privilege: Alex cannot register, edit, or delete upstream MCP servers. Most importantly, Alex never sees the WooCommerce API keys or MariaDB credentials.*
@@ -138,7 +138,7 @@ npm run metrics:populate
 > 
 > *Now, let's connect an external AI client using only this Gateway URL and Alex's key. I'll run our User B verification script, which uses the official `@modelcontextprotocol/sdk` to speak Streamable HTTP to `http://gateway.local.test:8080/mcp`.*
 > 
-> *Watch the terminal: the external client discovers all active tools across all three servers. Then it executes a multi-server prompt requiring coordination across two separate upstreams: it pulls today's store orders from the `woocommerce` server, and immediately queries the `time` server to calculate delivery cutoffs based on current warehouse business hours. Two independent microservices federated through a single endpoint with zero client-side credential configuration."*
+> *Watch the terminal: the external client discovers all active tools across all three servers. Then it executes a multi-server prompt requiring coordination across two separate upstreams: it pulls store products and revenue analytics, and queries the `time` server to calculate delivery cutoffs. Multiple independent microservices federated through a single endpoint with zero client-side credential configuration."*
 
 ### Codebase Deep-Dive References
 - **Streamable HTTP Endpoint**: `gateway/src/server.ts:L120-L195` (`/mcp` route establishing Streamable HTTP session, validating auth, and dispatching JSON-RPC).
@@ -154,11 +154,18 @@ npm run metrics:populate
 
 ### Visual Screen Choreography
 1. **[ACTION]**: In Alex's Dashboard window under **API Keys**, click **Revoke** on Alex's key. Confirm the native styled modal.
-2. **[ACTION]**: Re-run the User B script in terminal:
+2. **[ACTION]**: In Terminal, test connecting with that revoked key:
    ```bash
-   node scripts/verify-user-b.mjs
+   node scripts/verify-user-b.mjs <PASTE_REVOKED_KEY>
    ```
-   Show terminal output: `HTTP 401 Unauthorized - Invalid or revoked API key`.
+   Show terminal output:
+   ```text
+   ❌ Connection REJECTED by Gateway: HTTP 401 Unauthorized
+      Message: Streamable HTTP error: Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32000,"message":"Unauthorized: Invalid API key"},"id":null}
+      ✓ The provided API key is INVALID or has been REVOKED.
+      ✓ Instant Key Revocation successfully verified!
+   ```
+   *(Or run the automated lifecycle test: `npm run verify:revocation`, or curl: `curl.exe -i -H "Authorization: Bearer <REVOKED_KEY>" http://gateway.local.test:8080/mcp`)*
 3. **[ACTION]**: Switch to Admin window. In **Servers & Tools**, find the `time` server and click **Disable**.
 4. **[SCREEN]**: Show the badge change to `Disabled` (Gray). Show that the time tools disappear from the catalog.
 5. **[ACTION]**: In Terminal, trigger the Fault Isolation test or scale down the WooCommerce MCP server:
